@@ -1,0 +1,55 @@
+{
+  "files.exclude": {
+    "**/CMakeFiles": true,
+    "**/CMakeCache.txt": true,
+    "**/build/": true,
+    "**/build-*": true,
+    "**/.git/": true,
+    "**/.cache": true
+  },
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.configureOnOpen": true,
+  "cmake.generator": "Ninja",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.configureSettings": {
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+    "GEMMA_BUILD_ENHANCED_TESTS": "ON",
+    "GEMMA_BUILD_BACKEND_TESTS": "ON",
+    "GEMMA_PRINT_BACKEND_INCLUDE_HINTS": "ON"
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.errorSquiggles": "Enabled",
+  "C_Cpp.clang_format_style": "file",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": true,
+    "source.organizeImports": true
+  },
+  "editor.defaultFormatter": "ms-vscode.cpptools",
+  "[cpp]": { "editor.defaultFormatter": "ms-vscode.cpptools" },
+  "[cmake]": { "editor.defaultFormatter": "cheshirekow.cmake-format" },
+  "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
+  "python.analysis.typeCheckingMode": "basic",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests"],
+  "ruff.enable": true,
+  "ruff.lint.args": ["--force-exclude"],
+  "search.exclude": { "**/build": true, "**/compile_commands.json": true },
+  "markdownlint.config": {
+    "MD013": false
+  },
+  "doxdocgen.generic.authorTag": false,
+  "doxdocgen.file.copyrightTag": "(c) 2025 Gemma Contributors",
+  "doxdocgen.file.customTag": ["@file"],
+  "bazel.buildifierFixOnFormat": true,
+  "bazel.enableCodeLens": true,
+  "terminal.integrated.env.windows": {
+    "GEMMA_ONEAPI_ROOT": "${env:ONEAPI_ROOT}"
+  },
+  "cSpell.words": ["gemma", "paligemma", "sfp", "nuq", "MCP", "oneAPI", "SYCL"],
+  "cmake.statusbar.advanced": { "build": true, "debug": true, "launch": true }
+}

@@ -47,6 +47,16 @@ if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
 
+# CMP0126: set(CACHE) does not remove a normal variable of the same name
+if(POLICY CMP0126)
+  cmake_policy(SET CMP0126 NEW)
+endif()
+
+# CMP0169: FetchContent_Populate deprecation
+if(POLICY CMP0169)
+  cmake_policy(SET CMP0169 NEW)
+endif()
+
 # Set minimum policy version for all subdirectories to handle old dependencies
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)  # option() honors normal variables
 set(CMAKE_POLICY_DEFAULT_CMP0075 NEW)  # Include file check macros honor CMAKE_REQUIRED_LIBRARIES
@@ -151,6 +161,7 @@ option(GEMMA_BUILD_ENHANCED_TESTS "Build enhanced test suite" ON)
 option(GEMMA_BUILD_BACKEND_TESTS "Build backend-specific tests" ON)
 option(GEMMA_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(GEMMA_BUILD_DOCS "Build documentation" OFF)
+option(GEMMA_ENABLE_DOXYGEN "Generate Doxygen API docs (implies GEMMA_BUILD_DOCS)" OFF)
 
 # Auto-detection options
 option(GEMMA_AUTO_DETECT_BACKENDS "Automatically detect available backends" ON)
@@ -250,12 +261,27 @@ if(GEMMA_BUILD_ENHANCED_TESTS)
 endif()
 
 # Add documentation if enabled
-if(GEMMA_BUILD_DOCS)
+if(GEMMA_BUILD_DOCS OR GEMMA_ENABLE_DOXYGEN)
     message(STATUS "Adding documentation build")
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/docs)
         add_subdirectory(docs)
     else()
         message(WARNING "Docs directory not found, skipping documentation")
+    endif()
+    if(GEMMA_ENABLE_DOXYGEN)
+        find_package(Doxygen QUIET)
+        if(DOXYGEN_FOUND)
+            set(DOXYGEN_GENERATE_HTML YES)
+            set(DOXYGEN_GENERATE_LATEX NO)
+            set(DOXYGEN_EXTRACT_PRIVATE NO)
+            configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+            add_custom_target(docs_doxygen
+                COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Generating Doxygen documentation" VERBATIM)
+        else()
+            message(WARNING "Doxygen requested but not found")
+        endif()
     endif()
 endif()
 
@@ -336,6 +362,7 @@ message(STATUS "  - Enhanced Tests: ${GEMMA_BUILD_ENHANCED_TESTS}")
 message(STATUS "  - Backend Tests: ${GEMMA_BUILD_BACKEND_TESTS}")
 message(STATUS "  - Benchmarks: ${GEMMA_BUILD_BENCHMARKS}")
 message(STATUS "  - Documentation: ${GEMMA_BUILD_DOCS}")
+message(STATUS "  - Doxygen: ${GEMMA_ENABLE_DOXYGEN}")
 message(STATUS "")
 message(STATUS "Hardware Backends:")
 message(STATUS "  - SYCL/Intel oneAPI: ${GEMMA_BUILD_SYCL_BACKEND}")

@@ -1,0 +1,17 @@
+{
+  "recommendations": [
+    "ms-vscode.cpptools",
+    "ms-vscode.cmake-tools",
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "streetsidesoftware.code-spell-checker",
+    "eamodio.gitlens",
+    "trond-snekvik.simple-rst",
+    "yzhang.markdown-all-in-one",
+    "github.vscode-github-actions",
+    "bazelbuild.vscode-bazel",
+    "xaver.clang-format",
+    "cheshirekow.cmake-format",
+    "cschlosser.doxdocgen"
+  ]
+}
