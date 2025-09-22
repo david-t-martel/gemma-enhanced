@@ -1,0 +1,188 @@
+gemma.cpp/nul
+dist/
+## Consolidated .gitignore (merged and cleaned)
+
+# Core build outputs
+gemma.cpp/build*/
+gemma.cpp/nul
+build/
+dist/
+cmake-build-*/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+
+# Explicitly include GitHub workflows directory
+!/.github/
+
+# Allow tracking of VS Code tasks while ignoring the rest of the folder
+# VS Code: ignore all under .vscode except tasks.json (tracked)
+.vscode/*
+!/.vscode/tasks.json
+
+# IDE / editor folders
+.idea/
+.vs/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Node / JS (future-proof)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs / profiling
+logs/
+*.log
+server.log
+debug.log
+error.log
+*.prof
+*.nvprof
+*.trace
+*.timeline
+perf.data*
+callgrind.out*
+*.qdrep
+
+# Temporary / backup
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.#*
+*.backup
+*.bak
+*.orig
+*.save
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Model / large ML assets (never commit)
+*.sbs
+*.spm
+*.gguf
+*.pt
+*.pth
+*.onnx
+*.safetensors
+models/
+weights/
+tokenizers/
+
+# Archives / packages
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+*.whl
+
+# Coverage / test reports
+coverage/
+*.lcov
+*.gcda
+*.gcno
+coverage.info
+tests/results/
+tests/coverage/
+tests/temp/
+tests/reports/
+tests/output/
+*.junit
+*.xml
+
+# Backend specific build artifacts
+backends/build/
+backends/cuda/build/
+backends/cuda/ptx/
+backends/vulkan/build/
+backends/vulkan/spirv/
+backends/opencl/build/
+backends/opencl/kernels/*.bin
+backends/sycl/build/
+backends/metal/build/
+*.cubin
+*.fatbin
+*.cl_cache/
+*.metallib
+*.air
+*.spv
+*.cu.cache
+nvcc_tmp*
+
+# MCP & tools build outputs
+mcp/build/
+tools/build/
+
+# Runtime / app data
+mcp/logs/
+mcp/temp/
+mcp/pid/
+mcp/sockets/
+data/cache/
+data/logs/
+data/temp/
+runtime/
+
+# Config overrides
+config/local_*.yaml
+config/development_*.yaml
+config/*_override.*
+mcp/config/local_*.json
+mcp/config/development_*.json
+
+# Environment files
+.env
+.env.*
+
+# Package manager (vcpkg / conan / hunter)
+vcpkg_installed/
+.vcpkg-root
+vcpkg_*/
+conan*/
+conanbuild/
+conandata.yml
+conanfile.py
+_builds/
+_install/
+
+# Documentation build outputs
+docs/build/
+docs/html/
+docs/latex/
+docs/_build/
+docs/generated/
+site/
+doxygen_output/
+html/
+latex/
+
+# Task / project management temp files
+.taskmaster/state.json
+.taskmaster/temp/
+.taskmaster/cache/
+.taskmaster/logs/
+tasks_backup_*.json
+tasks_temp_*.json
+
+# Safety / catch-all patterns
+local_*
+temp_*
+tmp_*
+*.local
+*_temp/
+*_tmp/
+

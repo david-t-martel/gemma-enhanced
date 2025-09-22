@@ -1,0 +1,65 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure (RelWithSymbols)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=RelWithSymbols", "-DGEMMA_ENABLE_AUTO_BACKENDS=OFF", "-DGEMMA_ENABLE_SYCL=OFF"],
+      "problemMatcher": "$gcc",
+      "group": "build"
+    },
+    {
+      "label": "Build (RelWithSymbols)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build", "--config", "RelWithSymbols", "--", "-k", "0"],
+      "problemMatcher": ["$gcc", "$msCompile"],
+      "group": "build",
+      "dependsOn": ["Configure (RelWithSymbols)"]
+    },
+    {
+      "label": "Configure (FastDebug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["-S", ".", "-B", "build-fastdebug", "-DCMAKE_BUILD_TYPE=FastDebug", "-DGEMMA_ENABLE_AUTO_BACKENDS=OFF", "-DGEMMA_ENABLE_SYCL=OFF"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Build (FastDebug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build-fastdebug", "--config", "FastDebug", "--", "-k", "0"],
+      "problemMatcher": ["$gcc", "$msCompile"],
+      "dependsOn": ["Configure (FastDebug)"]
+    },
+    {
+      "label": "Run Tests (core)",
+      "type": "shell",
+      "command": "ctest",
+      "args": ["--test-dir", "build", "--output-on-failure", "--timeout", "300"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Reconfigure With SYCL (Verbose)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S", ".", "-B", "build-sycl", 
+        "-DCMAKE_BUILD_TYPE=RelWithSymbols",
+        "-DGEMMA_ENABLE_SYCL=ON",
+        "-DGEMMA_VERBOSE_BACKEND_DIAGNOSTICS=ON",
+        "-DGEMMA_ENABLE_AUTO_BACKENDS=OFF"
+      ],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Build SYCL", 
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build-sycl", "--config", "RelWithSymbols", "--", "-k", "0"],
+      "problemMatcher": ["$gcc", "$msCompile"],
+      "dependsOn": ["Reconfigure With SYCL (Verbose)"]
+    }
+  ]
+}
