@@ -21,23 +21,24 @@
   "C_Cpp.default.cppStandard": "c++20",
   "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
   "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
-  "C_Cpp.errorSquiggles": "Enabled",
+  "C_Cpp.errorSquiggles": "enabled",
   "C_Cpp.clang_format_style": "file",
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
-    "source.fixAll": true,
-    "source.organizeImports": true
+    // Use explicit 'always' to avoid boolean warning noise in some VS Code versions
+    "source.fixAll": "always",
+    "source.organizeImports": "always"
   },
   "editor.defaultFormatter": "ms-vscode.cpptools",
   "[cpp]": { "editor.defaultFormatter": "ms-vscode.cpptools" },
-  "[cmake]": { "editor.defaultFormatter": "cheshirekow.cmake-format" },
+  // Use CMake Tools for CMake formatting (previous formatter extension unsupported in current environment)
+  "[cmake]": { "editor.defaultFormatter": "ms-vscode.cmake-tools" },
   "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
   "python.analysis.typeCheckingMode": "basic",
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
   "python.testing.pytestArgs": ["tests"],
   "ruff.enable": true,
-  "ruff.lint.args": ["--force-exclude"],
   "search.exclude": { "**/build": true, "**/compile_commands.json": true },
   "markdownlint.config": {
     "MD013": false

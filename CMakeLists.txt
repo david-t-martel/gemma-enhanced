@@ -162,6 +162,7 @@ option(GEMMA_BUILD_BACKEND_TESTS "Build backend-specific tests" ON)
 option(GEMMA_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(GEMMA_BUILD_DOCS "Build documentation" OFF)
 option(GEMMA_ENABLE_DOXYGEN "Generate Doxygen API docs (implies GEMMA_BUILD_DOCS)" OFF)
+option(GEMMA_ENABLE_CLANG_TIDY "Run clang-tidy static analysis during compile (may slow builds)" OFF)
 
 # Auto-detection options
 option(GEMMA_AUTO_DETECT_BACKENDS "Automatically detect available backends" ON)
@@ -238,6 +239,26 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Add the original gemma.cpp as a subdirectory
 add_subdirectory(gemma.cpp)
+
+# ---------------------------------------------------------------------------
+# Optional clang-tidy integration (kept AFTER subdirectory add so that
+# cache variables from toolchains are visible but BEFORE targets built).
+# This applies globally; for more granular control we could restrict to
+# specific directories later. Keeping logic minimal to avoid side-effects.
+# ---------------------------------------------------------------------------
+if(GEMMA_ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy clang-tidy-18 clang-tidy-17)
+    if(CLANG_TIDY_EXE)
+        message(STATUS "Enabling clang-tidy: ${CLANG_TIDY_EXE}")
+        # Quiet some common noise; users can override with -DCLANG_TIDY_CHECKS="..."
+        if(NOT DEFINED CLANG_TIDY_CHECKS)
+            set(CLANG_TIDY_CHECKS "-*,clang-analyzer-*,performance-*,readability-*,modernize-*" CACHE STRING "clang-tidy checks" FORCE)
+        endif()
+        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-checks=${CLANG_TIDY_CHECKS}" CACHE STRING "clang-tidy command" FORCE)
+    else()
+        message(WARNING "GEMMA_ENABLE_CLANG_TIDY=ON but clang-tidy not found")
+    endif()
+endif()
 
 # Add MCP server component if enabled
 if(GEMMA_BUILD_MCP_SERVER)
