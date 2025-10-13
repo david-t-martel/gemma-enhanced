@@ -8,9 +8,6 @@ import toml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
-# Import from models.py to avoid duplicate class definitions
-from gemma_cli.config.models import ModelPreset, PerformanceProfile
-
 
 class GemmaConfig(BaseModel):
     """Gemma model configuration."""
@@ -18,6 +15,28 @@ class GemmaConfig(BaseModel):
     default_model: str
     default_tokenizer: str
     executable: str
+
+
+class ModelPreset(BaseModel):
+    """Model preset configuration."""
+
+    name: str
+    weights: str
+    tokenizer: str
+    format: str
+    size_gb: float
+    avg_tokens_per_sec: int
+    quality: str
+    use_case: str
+
+
+class PerformanceProfile(BaseModel):
+    """Performance profile configuration."""
+
+    max_tokens: int
+    temperature: float
+    top_p: float
+    description: str
 
 
 class RedisConfig(BaseModel):
@@ -378,19 +397,43 @@ def expand_path(path_str: str, allowed_dirs: Optional[List[Path]] = None) -> Pat
         # Add user home if different from .gemma_cli
         allowed_dirs.append(Path.home())
 
+    # Security check 1: Detect path traversal attempts in input
+    # Check input string before expansion
+    if ".." in str(path_str):
+        raise ValueError(
+            f"Path traversal not allowed in input: {path_str}\n"
+            "Security: Detected '..' component which could access parent directories"
+        )
+
     # Expand user home directory (~) and environment variables
     expanded = os.path.expanduser(path_str)
     expanded = os.path.expandvars(expanded)
 
+    # Check for traversal after expansion (catches malicious env vars)
+    if ".." in expanded:
+        raise ValueError(
+            f"Path traversal detected after expansion: {path_str} -> {expanded}\n"
+            "Security: Environment variable or tilde expansion resulted in path traversal"
+        )
+
     # Convert to Path and resolve to absolute path
     path = Path(expanded)
 
-    # Security check 1: Detect path traversal attempts
-    # Check both in original string and normalized path
-    if ".." in str(path_str) or ".." in path.parts:
+    # Also check normalized path parts
+    if ".." in path.parts:
         raise ValueError(
             f"Path traversal not allowed: {path_str}\n"
-            "Security: Detected '..' component which could access parent directories"
+            "Security: Detected '..' component in normalized path"
+        )
+
+    # Check for URL-encoded path traversal attempts
+    import urllib.parse
+    decoded_once = urllib.parse.unquote(path_str)
+    decoded_twice = urllib.parse.unquote(decoded_once)
+    if ".." in decoded_once or ".." in decoded_twice:
+        raise ValueError(
+            f"Path traversal not allowed (encoded): {path_str}\n"
+            "Security: Detected URL-encoded '..' which could access parent directories"
         )
 
     # Resolve to real path (follows symlinks, gets absolute path)
@@ -405,9 +448,27 @@ def expand_path(path_str: str, allowed_dirs: Optional[List[Path]] = None) -> Pat
         try:
             allowed_resolved = allowed_dir.resolve(strict=False)
             # Check if resolved path is relative to allowed directory
-            if str(resolved).startswith(str(allowed_resolved)):
+            # Use Path comparison to handle UNC paths correctly
+            try:
+                # Python 3.9+ has is_relative_to
+                if hasattr(resolved, 'is_relative_to'):
+                    try:
+                        if resolved.is_relative_to(allowed_resolved):
+                            is_allowed = True
+                            break
+                    except (AttributeError, ValueError, TypeError):
+                        pass  # Method exists but failed, try fallback
+            except (ValueError, TypeError):
+                pass
+
+            # Fallback for older Python or edge cases
+            try:
+                resolved.relative_to(allowed_resolved)
                 is_allowed = True
                 break
+            except ValueError:
+                pass  # Not relative to this allowed dir
+
         except (OSError, RuntimeError):
             continue  # Skip invalid allowed directories
 
@@ -419,85 +480,8 @@ def expand_path(path_str: str, allowed_dirs: Optional[List[Path]] = None) -> Pat
         )
 
     # Security check 3: Additional validation for symlinks
-    if path.is_symlink():
-        # Verify symlink target is also within allowed directories
-        target = path.readlink()
-        if target.is_absolute():
-            try:
-                expand_path(str(target), allowed_dirs)  # Recursive validation
-            except ValueError as e:
-                raise ValueError(
-                    f"Symlink target {target} failed security validation: {e}"
-                ) from e
+    # The resolve() call already followed the symlink, and we validated the resolved
+    # path is within allowed directories, so if we get here the symlink is safe.
+    # No additional validation needed since resolved path was already checked.
 
     return resolved
-
-
-def save_config(settings: Settings, config_path: Optional[Path] = None) -> None:
-    """
-    Save configuration to TOML file.
-
-    Args:
-        settings: Settings instance to save
-        config_path: Path to config.toml file. If None, uses default location.
-
-    Raises:
-        OSError: If config file cannot be written
-    """
-    import tomli_w
-
-    if config_path is None:
-        # Use default location
-        config_path = Path.home() / ".gemma_cli" / "config.toml"
-
-    # Create parent directory if needed
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Convert settings to dict
-    config_data = settings.model_dump(mode="json", exclude_none=True)
-
-    # Write to file
-    with open(config_path, "wb") as f:
-        tomli_w.dump(config_data, f)
-
-
-class ConfigManager:
-    """
-    Configuration manager for loading and saving settings.
-
-    Provides a simple interface for managing configuration persistence.
-    """
-
-    def __init__(self, config_path: Optional[Path] = None) -> None:
-        """
-        Initialize configuration manager.
-
-        Args:
-            config_path: Path to config file. If None, uses default location.
-        """
-        self.config_path = config_path
-
-    def load(self) -> Settings:
-        """
-        Load configuration from file.
-
-        Returns:
-            Settings instance
-
-        Raises:
-            FileNotFoundError: If config file doesn't exist
-            ValueError: If config file is invalid
-        """
-        return load_config(self.config_path)
-
-    def save(self, settings: Settings) -> None:
-        """
-        Save configuration to file.
-
-        Args:
-            settings: Settings instance to save
-
-        Raises:
-            OSError: If config file cannot be written
-        """
-        save_config(settings, self.config_path)

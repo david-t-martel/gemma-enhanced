@@ -99,7 +99,7 @@ AttributeMacros:
 
 # Template formatting for heavy template usage in gemma.cpp
 SpacesInAngles: Never
-# AlwaysBreakTemplateDeclarations already set at line 77
+AlwaysBreakTemplateDeclarations: Yes
 BreakBeforeConceptDeclarations: Always
 
 # ==========================================================================

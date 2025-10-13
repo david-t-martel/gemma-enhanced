@@ -7,8 +7,8 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from gemma_cli.commands.setup import config, health, init, reset, tutorial
-from gemma_cli.commands.model import model, profile
+from .commands.setup import config, health, init, reset, tutorial
+from .commands.model import model, profile
 
 console = Console()
 

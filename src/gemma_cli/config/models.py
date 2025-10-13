@@ -18,13 +18,6 @@ from rich.table import Table
 console = Console()
 
 
-class ValidationResult(BaseModel):
-    """Result of model validation."""
-
-    is_valid: bool = Field(..., description="Whether validation passed")
-    errors: List[str] = Field(default_factory=list, description="List of validation errors")
-
-
 class ModelPreset(BaseModel):
     """Model preset configuration with metadata.
 
@@ -69,35 +62,6 @@ class ModelPreset(BaseModel):
         if v.lower() not in valid_qualities:
             raise ValueError(f"Quality must be one of: {valid_qualities}")
         return v.lower()
-
-    def is_available(self) -> bool:
-        """Check if model weights and tokenizer files exist."""
-        weights_path = Path(self.weights)
-        tokenizer_path = Path(self.tokenizer)
-        return weights_path.exists() and tokenizer_path.exists()
-
-    def validate(self) -> ValidationResult:
-        """
-        Validate model files exist and are correct size.
-
-        Returns:
-            ValidationResult with is_valid flag and list of errors
-        """
-        errors = []
-
-        weights_path = Path(self.weights)
-        if not weights_path.exists():
-            errors.append(f"Weights file not found: {self.weights}")
-        elif weights_path.stat().st_size == 0:
-            errors.append("Weights file is empty")
-
-        tokenizer_path = Path(self.tokenizer)
-        if not tokenizer_path.exists():
-            errors.append(f"Tokenizer file not found: {self.tokenizer}")
-        elif tokenizer_path.stat().st_size == 0:
-            errors.append("Tokenizer file is empty")
-
-        return ValidationResult(is_valid=len(errors) == 0, errors=errors)
 
 
 class PerformanceProfile(BaseModel):
