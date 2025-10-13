@@ -8,6 +8,9 @@ import toml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
+# Import from models.py to avoid duplicate class definitions
+from gemma_cli.config.models import ModelPreset, PerformanceProfile
+
 
 class GemmaConfig(BaseModel):
     """Gemma model configuration."""
@@ -15,28 +18,6 @@ class GemmaConfig(BaseModel):
     default_model: str
     default_tokenizer: str
     executable: str
-
-
-class ModelPreset(BaseModel):
-    """Model preset configuration."""
-
-    name: str
-    weights: str
-    tokenizer: str
-    format: str
-    size_gb: float
-    avg_tokens_per_sec: int
-    quality: str
-    use_case: str
-
-
-class PerformanceProfile(BaseModel):
-    """Performance profile configuration."""
-
-    max_tokens: int
-    temperature: float
-    top_p: float
-    description: str
 
 
 class RedisConfig(BaseModel):
@@ -450,3 +431,73 @@ def expand_path(path_str: str, allowed_dirs: Optional[List[Path]] = None) -> Pat
                 ) from e
 
     return resolved
+
+
+def save_config(settings: Settings, config_path: Optional[Path] = None) -> None:
+    """
+    Save configuration to TOML file.
+
+    Args:
+        settings: Settings instance to save
+        config_path: Path to config.toml file. If None, uses default location.
+
+    Raises:
+        OSError: If config file cannot be written
+    """
+    import tomli_w
+
+    if config_path is None:
+        # Use default location
+        config_path = Path.home() / ".gemma_cli" / "config.toml"
+
+    # Create parent directory if needed
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Convert settings to dict
+    config_data = settings.model_dump(mode="json", exclude_none=True)
+
+    # Write to file
+    with open(config_path, "wb") as f:
+        tomli_w.dump(config_data, f)
+
+
+class ConfigManager:
+    """
+    Configuration manager for loading and saving settings.
+
+    Provides a simple interface for managing configuration persistence.
+    """
+
+    def __init__(self, config_path: Optional[Path] = None) -> None:
+        """
+        Initialize configuration manager.
+
+        Args:
+            config_path: Path to config file. If None, uses default location.
+        """
+        self.config_path = config_path
+
+    def load(self) -> Settings:
+        """
+        Load configuration from file.
+
+        Returns:
+            Settings instance
+
+        Raises:
+            FileNotFoundError: If config file doesn't exist
+            ValueError: If config file is invalid
+        """
+        return load_config(self.config_path)
+
+    def save(self, settings: Settings) -> None:
+        """
+        Save configuration to file.
+
+        Args:
+            settings: Settings instance to save
+
+        Raises:
+            OSError: If config file cannot be written
+        """
+        save_config(settings, self.config_path)

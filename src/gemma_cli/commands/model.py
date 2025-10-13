@@ -51,7 +51,7 @@ from gemma_cli.config.models import (
     PerformanceProfile,
     ProfileManager,
 )
-from gemma_cli.config.settings import ConfigManager, load_config
+from gemma_cli.config.settings import ConfigManager, Settings, load_config
 from gemma_cli.ui.console import get_console
 from gemma_cli.ui.formatters import (
     format_error_message,
@@ -115,7 +115,8 @@ def list(
         show_paths: Include full file paths in output
     """
     try:
-        manager = ModelManager()
+        config_path = Path.home() / ".gemma_cli" / "config.toml"
+        manager = ModelManager(config_path)
         presets = manager.list_models()
 
         # Apply filters
@@ -323,7 +324,8 @@ def info(model_name: str, validate: bool) -> None:
         validate: Whether to validate file existence
     """
     try:
-        manager = ModelManager()
+        config_path = Path.home() / ".gemma_cli" / "config.toml"
+        manager = ModelManager(config_path)
         preset = manager.get_model(model_name)
 
         if not preset:
@@ -497,7 +499,8 @@ def use(model_name: str, set_paths: bool) -> None:
         set_paths: Prompt to update paths if model files not found
     """
     try:
-        manager = ModelManager()
+        config_path = Path.home() / ".gemma_cli" / "config.toml"
+        manager = ModelManager(config_path)
         preset = manager.get_model(model_name)
 
         if not preset:
@@ -809,7 +812,8 @@ def validate(model_name: str, fix: bool) -> None:
         fix: Whether to attempt automatic fixes
     """
     try:
-        manager = ModelManager()
+        config_path = Path.home() / ".gemma_cli" / "config.toml"
+        manager = ModelManager(config_path)
         preset = manager.get_model(model_name)
 
         if not preset:
