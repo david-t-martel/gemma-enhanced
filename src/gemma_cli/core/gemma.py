@@ -73,66 +73,49 @@ class GemmaInterface:
             )
 
     def _find_gemma_executable(self) -> str:
-        """Find gemma executable in standard locations.
+        """
+        Find gemma executable in standard and configured locations.
 
-        Search order:
-            1. GEMMA_EXECUTABLE environment variable
-            2. Common build directories relative to cwd
-            3. System PATH
+        Search Order:
+        1.  `GEMMA_EXECUTABLE` environment variable.
+        2.  Pre-defined common build directories.
+        3.  System's PATH.
 
         Returns:
-            Path to gemma executable
+            The absolute path to the gemma executable.
 
         Raises:
-            FileNotFoundError: If executable not found in any location
+            FileNotFoundError: If the executable cannot be found.
         """
-        # Check environment variable first
-        if "GEMMA_EXECUTABLE" in os.environ:
-            path = os.environ["GEMMA_EXECUTABLE"]
-            if os.path.exists(path):
-                return path
+        exe_name = "gemma.exe" if os.name == "nt" else "gemma"
+        
+        # 1. Check environment variable
+        if gemma_path := os.environ.get("GEMMA_EXECUTABLE"):
+            if Path(gemma_path).exists():
+                return gemma_path
 
-        # Search common build locations (Windows-focused, adjust for Linux)
-        is_windows = os.name == "nt"
-        exe_name = "gemma.exe" if is_windows else "gemma"
-
+        # 2. Search common build directories
+        # User-provided path is now the first search path
         search_paths = [
-            # Standard CMake build directories
             Path.cwd() / "build" / "Release" / exe_name,
-            Path.cwd() / "build" / "RelWithSymbols" / exe_name,
-            Path.cwd() / "build" / "Debug" / exe_name,
-            Path.cwd() / "build" / "FastDebug" / exe_name,
-            Path.cwd() / "build" / exe_name,
-            # Custom build directory patterns
             Path.cwd() / "build-avx2-sycl" / "bin" / "RELEASE" / exe_name,
-            Path.cwd() / "build-avx2" / "Release" / exe_name,
-            # Parent directory builds (if gemma_cli is subdirectory)
+            Path.cwd() / "build_wsl" / exe_name,
             Path.cwd().parent / "build" / "Release" / exe_name,
-            Path.cwd().parent / "build" / exe_name,
         ]
+        
+        for path in search_paths:
+            if path.exists():
+                return str(path.resolve())
 
-        for search_path in search_paths:
-            if search_path.exists():
-                return str(search_path)
-
-        # Search system PATH as last resort
+        # 3. Search system PATH
         import shutil
+        if gemma_path := shutil.which(exe_name):
+            return gemma_path
 
-        path = shutil.which(exe_name)
-        if path and os.path.exists(path):
-            return path
-
-        # Not found anywhere - provide helpful error
         raise FileNotFoundError(
-            f"Gemma executable '{exe_name}' not found.\n"
-            f"Searched locations:\n"
-            f"  - GEMMA_EXECUTABLE environment variable\n"
-            f"  - Common build directories: {', '.join(str(p.parent) for p in search_paths[:5])}\n"
-            f"  - System PATH\n\n"
-            f"Solutions:\n"
-            f"  1. Set environment variable: GEMMA_EXECUTABLE=/path/to/{exe_name}\n"
-            f"  2. Build gemma: cmake -B build && cmake --build build --config Release\n"
-            f"  3. Pass explicit path: GemmaInterface(model_path, gemma_executable='/path/to/{exe_name}')"
+            f"'{exe_name}' not found. Searched environment variables, "
+            f"common build directories, and system PATH. Please ensure gemma.exe is built "
+            f"and its location is in the system PATH or set via GEMMA_EXECUTABLE."
         )
 
     def _build_command(self, prompt: str) -> list[str]:
@@ -270,11 +253,7 @@ class GemmaInterface:
             return "".join(response_parts)
 
         except (OSError, ValueError, RuntimeError) as e:
-            error_msg = f"Error communicating with gemma: {e}"
-            if self.debug_mode:
-                print(f"Debug - {error_msg}")
-                print(f"Debug - Command was: {' '.join(cmd)}")
-            return f"Error: {str(e)}"
+            raise e
 
         finally:
             await self._cleanup_process()

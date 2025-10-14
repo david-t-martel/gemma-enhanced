@@ -500,6 +500,7 @@ _label_if_exists(test_intel_backend             "unit;backend;intel")
 _label_if_exists(test_mcp_protocol              "unit;mcp;protocol")
 _label_if_exists(test_cli_commands              "unit;cli")
 _label_if_exists(test_mcp_validation            "mcp;validation;protocol")
+_label_if_exists(session_split_smoke            "session;refactor;smoke")
 
 # Provide a meta target to list labels (developer convenience)
 add_custom_target(print_test_labels

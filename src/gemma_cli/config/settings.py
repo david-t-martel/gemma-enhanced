@@ -279,49 +279,50 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 
-def load_config(config_path: Optional[Path] = None) -> Settings:
-    """
-    Load configuration from TOML file.
+class ConfigManager:
+    """Manages loading and saving of the application settings."""
 
-    Args:
-        config_path: Path to config.toml file. If None, uses default location.
+    def __init__(self, config_path: Optional[Path] = None):
+        self.config_path = config_path or self._find_config_path()
 
-    Returns:
-        Settings instance with loaded configuration
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        ValueError: If config file is invalid
-    """
-    if config_path is None:
-        # Try to find config.toml in standard locations
+    def _find_config_path(self) -> Path:
+        """Find the config.toml file in standard locations."""
         possible_paths = [
             Path("config/config.toml"),
             Path.cwd() / "config" / "config.toml",
             Path.home() / ".gemma_cli" / "config.toml",
         ]
-
         for path in possible_paths:
             if path.exists():
-                config_path = path
-                break
+                return path
+        return Path.home() / ".gemma_cli" / "config.toml"  # Default path
 
-    if config_path is None or not config_path.exists():
-        raise FileNotFoundError(
-            "Config file not found. Please create config/config.toml or ~/.gemma_cli/config.toml"
-        )
+    def load(self) -> Settings:
+        """Load configuration from TOML file."""
+        if not self.config_path.exists():
+            return Settings()  # Return default settings if no config file
 
-    # Load TOML file
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            config_data = toml.load(f)
-    except (OSError, toml.TomlDecodeError) as e:
-        raise ValueError(f"Error loading config file: {e}") from e
+        try:
+            with open(self.config_path, encoding="utf-8") as f:
+                config_data = toml.load(f)
+            return Settings(**config_data)
+        except (OSError, toml.TomlDecodeError) as e:
+            raise ValueError(f"Error loading config file: {e}") from e
 
-    # Parse configuration
-    settings = Settings(**config_data)
+    def save(self, settings: Settings) -> None:
+        """Save configuration to TOML file."""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                toml.dump(settings.model_dump(), f)
+        except (OSError, toml.TomlDecodeError) as e:
+            raise ValueError(f"Error saving config file: {e}") from e
 
-    return settings
+
+def load_config(config_path: Optional[Path] = None) -> Settings:
+    """Load configuration from TOML file."""
+    return ConfigManager(config_path).load()
+
 
 
 def get_model_preset(settings: Settings, model_name: str) -> Optional[ModelPreset]:

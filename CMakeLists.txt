@@ -67,6 +67,8 @@ project(gemma_enhanced
     LANGUAGES CXX C
 )
 
+find_package(Threads REQUIRED)
+
 # Early environment validation (optional step to diagnose user setups)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(EnvValidation)
@@ -76,6 +78,116 @@ gemma_validate_environment()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# ---------------------------------------------------------------
+# Optional: force-enable AVX2 (and FMA) for x86_64 builds.
+# Highway will still multi-target internally, but /arch:AVX2 on MSVC
+# ensures the compiler is allowed to emit AVX2 code in generated TU(s).
+# Can be disabled with -DGEMMA_FORCE_AVX2=OFF or overridden by a user-
+# supplied /arch flag.
+# ---------------------------------------------------------------
+option(GEMMA_FORCE_AVX2 "Force /arch:AVX2 (or -mavx2) for supported x86_64 builds" ON)
+option(GEMMA_REQUIRE_AVX2 "Fail CMake configure if AVX2 cannot be enabled" ON)
+if(GEMMA_FORCE_AVX2 AND CMAKE_SYSTEM_PROCESSOR MATCHES "[Xx]86_64|AMD64")
+    # Skip if user already injected an /arch flag manually.
+    string(REGEX MATCH "/arch:[A-Za-z0-9_]+" _have_arch_flag "${CMAKE_CXX_FLAGS}")
+    if(NOT _have_arch_flag)
+        if(MSVC)
+            add_compile_options(/arch:AVX2)
+            # Also append to global flags so try_compile/check_cxx_source_compiles inherit it
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2" CACHE STRING "Global CXX flags" FORCE)
+            set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} /arch:AVX2")
+            message(STATUS "GEMMA_FORCE_AVX2: enabling /arch:AVX2")
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+            add_compile_options(-mavx2 -mfma)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -mfma" CACHE STRING "Global CXX flags" FORCE)
+            set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -mavx2 -mfma")
+            message(STATUS "GEMMA_FORCE_AVX2: enabling -mavx2 -mfma")
+        endif()
+    else()
+        message(STATUS "GEMMA_FORCE_AVX2 requested but existing /arch flag present; leaving as-is: ${_have_arch_flag}")
+    endif()
+endif()
+
+# If AVX2 is required, perform a compile-time probe to ensure __AVX2__ is defined
+if(GEMMA_REQUIRE_AVX2)
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "[Xx]86_64|AMD64")
+        message(FATAL_ERROR "GEMMA_REQUIRE_AVX2=ON but target processor '${CMAKE_SYSTEM_PROCESSOR}' is not x86_64/AMD64")
+    endif()
+    # For MSVC, rely on presence of /arch:AVX2 flag because try_compile may drop it in some generators.
+    if(MSVC)
+        string(REGEX MATCH "/arch:AVX2" _msvc_has_avx2 "${CMAKE_CXX_FLAGS}")
+        if(_msvc_has_avx2)
+            set(GEMMA_HAS_AVX2 TRUE)
+            message(STATUS "AVX2 requirement satisfied (MSVC /arch:AVX2 detected).")
+        endif()
+    endif()
+    if(NOT GEMMA_HAS_AVX2)
+        include(CheckCXXSourceCompiles)
+        set(_AVX2_TEST_SRC "#include <immintrin.h>\nint main(){ __m256i a=_mm256_set1_epi32(1); __m256i b=_mm256_set1_epi32(2); __m256i c=_mm256_add_epi32(a,b); (void)c; return 0; }")
+        check_cxx_source_compiles("${_AVX2_TEST_SRC}" GEMMA_HAS_AVX2)
+    endif()
+    if(NOT GEMMA_HAS_AVX2)
+        message(FATAL_ERROR "AVX2 required but compile probe failed. Provide /arch:AVX2 (MSVC) or -mavx2 -mfma (GCC/Clang) or set -DGEMMA_REQUIRE_AVX2=OFF.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Output Directory Configuration
+# Organize all build outputs into a clean hierarchy under build/
+# ---------------------------------------------------------------------------
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+# ----------------------------------------------------------------------------
+# Global Strict Mode (treat warnings as errors for project targets)
+# Excludes targets whose SOURCE_DIR lives under third_party/ to avoid
+# inheriting external project noise. Individual subdirectories (e.g. session)
+# may already add /WX or -Werror; this provides a unified toggle.
+# ----------------------------------------------------------------------------
+option(GEMMA_STRICT "Treat warnings as errors for all in-repo targets (ex third_party)" ON)
+if(GEMMA_STRICT)
+    message(STATUS "Strict mode: ON (promoting warnings to errors for project targets)")
+    # Collect all defined targets so far
+    get_property(_ALL_GEMMA_TARGETS GLOBAL PROPERTY TARGETS)
+    foreach(_t IN LISTS _ALL_GEMMA_TARGETS)
+        # Skip imported / interface / utility targets
+        get_target_property(_t_type ${_t} TYPE)
+        if(_t_type STREQUAL "INTERFACE_LIBRARY" OR _t_type STREQUAL "UTILITY")
+            continue()
+        endif()
+        # Some generated helper targets have no SOURCE_DIR (skip quietly)
+        get_target_property(_t_src_dir ${_t} SOURCE_DIR)
+        if(NOT _t_src_dir)
+            continue()
+        endif()
+        # Exclude any target defined under third_party
+        string(FIND "${_t_src_dir}" "${CMAKE_SOURCE_DIR}/third_party" _third_party_pos)
+        if(_third_party_pos EQUAL 0)
+            continue()
+        endif()
+        # Apply warnings-as-errors
+        if(MSVC)
+            target_compile_options(${_t} PRIVATE /WX)
+        else()
+            target_compile_options(${_t} PRIVATE -Werror)
+        endif()
+    endforeach()
+endif()
+
+# For multi-configuration generators (Visual Studio, Xcode), create per-config subdirectories
+foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/bin/${OUTPUTCONFIG})
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/lib/${OUTPUTCONFIG})
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/lib/${OUTPUTCONFIG})
+endforeach()
+
+message(STATUS "Output directories configured:")
+message(STATUS "  Runtime (executables): ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "  Libraries (shared): ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+message(STATUS "  Archives (static): ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
 
 # ---------------------------------------------------------------------------
 # Normalize / support custom (non-standard) build types used by presets.
@@ -145,10 +257,10 @@ if(GEMMA_ONEAPI_ROOT)
 endif()
 
 # Build options for new components
-option(GEMMA_BUILD_MCP_SERVER "Build MCP server component" ON)
-option(GEMMA_BUILD_BACKENDS "Build hardware acceleration backends" ON)
+option(GEMMA_BUILD_MCP_SERVER "Build MCP server component" OFF)
+option(GEMMA_BUILD_BACKENDS "Build hardware acceleration backends" OFF)
 
-# Hardware backend options with automatic detection
+# Hardware backend options with automatic detection (disabled for CPU-only build)
 option(GEMMA_BUILD_SYCL_BACKEND "(Legacy root control) Build SYCL/Intel oneAPI backend" OFF)
 option(GEMMA_BUILD_CUDA_BACKEND "(Legacy root control) Build CUDA acceleration backend" OFF)
 option(GEMMA_BUILD_OPENCL_BACKEND "(Legacy root control) Build OpenCL acceleration backend" OFF)
@@ -163,10 +275,50 @@ option(GEMMA_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(GEMMA_BUILD_DOCS "Build documentation" OFF)
 option(GEMMA_ENABLE_DOXYGEN "Generate Doxygen API docs (implies GEMMA_BUILD_DOCS)" OFF)
 option(GEMMA_ENABLE_CLANG_TIDY "Run clang-tidy static analysis during compile (may slow builds)" OFF)
+option(GEMMA_ENABLE_SESSION "Enable experimental session management subsystem" OFF)
+option(GEMMA_BUILD_SESSION_BENCH "Build session benchmarks (requires GEMMA_ENABLE_SESSION)" OFF)
+option(GEMMA_BUILD_ENHANCED_CLI "Build enhanced experimental CLI (depends optionally on session)" OFF)
 
-# Auto-detection options
-option(GEMMA_AUTO_DETECT_BACKENDS "Automatically detect available backends" ON)
+# Auto-detection options (disabled for CPU-only build)
+option(GEMMA_AUTO_DETECT_BACKENDS "Automatically detect available backends" OFF)
 option(GEMMA_VERBOSE_BACKEND_DIAGNOSTICS "Print extended backend environment diagnostics during configure" OFF)
+
+# ---------------------------------------------------------------------------
+# Backward / cross-tree option compatibility layer
+# ---------------------------------------------------------------------------
+# The original gemma.cpp subproject introduced GEMMA_ENABLE_AUTO_BACKENDS and
+# GEMMA_ENABLE_* backend toggles, while the enhanced root uses
+# GEMMA_AUTO_DETECT_BACKENDS + GEMMA_BUILD_BACKENDS. Provide aliasing so that
+# older invocation styles continue to work and we can map a single flag to the
+# subproject expectations without forcing users to memorize both.
+
+# Map legacy root flag to subproject auto backend discover flag if user passed
+# -DGEMMA_AUTO_DETECT_BACKENDS but not the subproject one.
+if(DEFINED GEMMA_AUTO_DETECT_BACKENDS AND NOT DEFINED GEMMA_ENABLE_AUTO_BACKENDS)
+    set(GEMMA_ENABLE_AUTO_BACKENDS ${GEMMA_AUTO_DETECT_BACKENDS} CACHE BOOL "(alias) Auto-detect available GPU backends" FORCE)
+endif()
+
+# If user requested consolidated backend build (GEMMA_BUILD_BACKENDS ON) and
+# is NOT forcing legacy root backend path, proactively enable individual
+# backend flags so gemma.cpp subproject detection code engages. We only flip
+# those not explicitly set by the user to avoid overriding deliberate OFF.
+if(GEMMA_BUILD_BACKENDS AND NOT GEMMA_USE_LEGACY_BACKEND_BUILD)
+    foreach(_backend IN ITEMS CUDA SYCL OPENCL VULKAN METAL)
+        if(NOT DEFINED GEMMA_ENABLE_${_backend})
+            # Default to ON; detection code will gracefully disable if toolchain missing.
+            set(GEMMA_ENABLE_${_backend} ON CACHE BOOL "(forwarded) Enable ${_backend} backend" FORCE)
+        endif()
+    endforeach()
+    # If user asked for auto-detect (root flag) propagate to subproject flag.
+    if(GEMMA_AUTO_DETECT_BACKENDS)
+        set(GEMMA_ENABLE_AUTO_BACKENDS ON CACHE BOOL "(alias) Auto-detect and enable available GPU backends" FORCE)
+    endif()
+    if(GEMMA_ENABLE_AUTO_BACKENDS)
+        message(STATUS "Unified backend enable: AUTO_DETECT=ON (request all and let detection prune)")
+    else()
+        message(STATUS "Unified backend enable: static enable flags set (no auto-detect)")
+    endif()
+endif()
 
 # Propagate verbose diagnostics flag to subprojects
 set(GEMMA_VERBOSE_BACKEND_DIAGNOSTICS ${GEMMA_VERBOSE_BACKEND_DIAGNOSTICS} CACHE BOOL "Verbose backend diagnostics (propagated)" FORCE)
@@ -187,8 +339,8 @@ message(STATUS "Hardware Backends: ${GEMMA_BUILD_BACKENDS}")
 # Include directories for enhanced components
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
-# Create cmake directory if it doesn't exist
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+# Include centralized dependency management
+include(Dependencies)
 
 # Auto-detect available backends if enabled
 if(GEMMA_USE_LEGACY_BACKEND_BUILD AND GEMMA_BUILD_BACKENDS)
@@ -237,8 +389,60 @@ endif()
 # This is required for sentencepiece which has cmake_minimum_required(VERSION 3.1)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
+# ---------------------------------------------------------------------------
+# Local third-party dependencies setup
+# Detect and configure local dependencies before gemma.cpp subdirectory
+# ---------------------------------------------------------------------------
+message(STATUS "Configuring local third-party dependencies...")
+
+# Check for local Highway availability and set flags for Dependencies.cmake
+# Priority order: highway-github (complete GitHub version) > highway (custom version)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/highway-github/CMakeLists.txt")
+    message(STATUS "Found GitHub Highway in third_party/highway-github (commit 1d16731233de45a365b43867f27d0a5f73925300)")
+    # Set flag for Dependencies.cmake to handle the inclusion
+    # Force local Highway even if system/vcpkg highway is present so that contrib headers are available
+    set(GEMMA_LOCAL_HIGHWAY_PROVIDED ON CACHE BOOL "Highway provided by local third_party (GitHub version - forced)" FORCE)
+    set(GEMMA_LOCAL_HIGHWAY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/highway-github" CACHE PATH "Local Highway source path (forced)" FORCE)
+    set(GEMMA_PREFER_SYSTEM_DEPS OFF CACHE BOOL "Disable system/vcpkg preference to ensure local Highway with contrib" FORCE)
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/highway/CMakeLists.txt")
+    message(STATUS "Found local Highway in third_party/highway")
+    # Set flag for Dependencies.cmake to handle the inclusion
+    set(GEMMA_LOCAL_HIGHWAY_PROVIDED ON CACHE BOOL "Highway provided by local third_party" FORCE)
+    set(GEMMA_LOCAL_HIGHWAY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/highway" CACHE PATH "Local Highway source path" FORCE)
+else()
+    message(STATUS "Local Highway not found in third_party/ directories")
+    set(GEMMA_LOCAL_HIGHWAY_PROVIDED OFF CACHE BOOL "Highway provided by local third_party" FORCE)
+    unset(GEMMA_LOCAL_HIGHWAY_PATH CACHE)
+endif()
+
+# Check and add SentencePiece from local third_party directory
+# Note: Disabled for CPU-only build to prefer vcpkg packages
+if(FALSE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sentencepiece/CMakeLists.txt")
+    message(STATUS "Found local SentencePiece in third_party/sentencepiece")
+    # Configure sentencepiece build options before adding
+    set(SPM_ENABLE_SHARED OFF CACHE BOOL "Disable shared libraries for sentencepiece")
+    set(SPM_ABSL_PROVIDER "module" CACHE STRING "Use module provider for absl")
+    set(SPM_BUILD_TEST OFF CACHE BOOL "Disable sentencepiece tests")
+    set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "Disable tcmalloc")
+    add_subdirectory(third_party/sentencepiece)
+    set(GEMMA_LOCAL_SENTENCEPIECE_PROVIDED ON CACHE BOOL "SentencePiece provided by local third_party" FORCE)
+else()
+    message(STATUS "Using vcpkg SentencePiece instead of local third_party")
+    set(GEMMA_LOCAL_SENTENCEPIECE_PROVIDED OFF CACHE BOOL "SentencePiece provided by local third_party" FORCE)
+endif()
+
 # Add the original gemma.cpp as a subdirectory
 add_subdirectory(gemma.cpp)
+
+# Optional session subsystem (experimental)
+if(GEMMA_ENABLE_SESSION)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/session/CMakeLists.txt)
+        message(STATUS "Session subsystem enabled")
+        add_subdirectory(tools/session)
+    else()
+        message(WARNING "Session subsystem requested but tools/session not found")
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Optional clang-tidy integration (kept AFTER subdirectory add so that
@@ -325,7 +529,9 @@ if(GEMMA_BUILD_MCP_SERVER AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mcp)
 endif()
 
 if(GEMMA_BUILD_BACKENDS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/backends)
-    add_dependencies(gemma_all gemma_backends)
+    if(TARGET gemma_backends)
+        add_dependencies(gemma_all gemma_backends)
+    endif()
 endif()
 
 # Add CLI tool to main target
@@ -357,6 +563,12 @@ endif()
 # Installation configuration
 set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/install CACHE PATH "Installation directory")
 
+# Standard install directories
+include(GNUInstallDirs)
+set(CMAKE_INSTALL_BINDIR bin)
+set(CMAKE_INSTALL_LIBDIR lib)
+set(CMAKE_INSTALL_INCLUDEDIR include)
+
 # Configure compiler-specific optimizations
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -DNDEBUG")
@@ -368,6 +580,12 @@ endif()
 
 # Summary
 message(STATUS "=== Enhanced Gemma.cpp Build Configuration ===")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann_json/single_include/nlohmann/json.hpp")
+    message(STATUS "Vendored nlohmann_json: ON")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite/sqlite3.c")
+    message(STATUS "Vendored sqlite3: ON")
+endif()
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Install Prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "Platform: ${GEMMA_PLATFORM}")
@@ -380,6 +598,9 @@ message(STATUS "  - Core Gemma.cpp: ON")
 message(STATUS "  - MCP Server: ${GEMMA_BUILD_MCP_SERVER}")
 message(STATUS "  - Hardware Backends: ${GEMMA_BUILD_BACKENDS}")
 message(STATUS "  - Enhanced Tests: ${GEMMA_BUILD_ENHANCED_TESTS}")
+message(STATUS "  - Session Subsystem: ${GEMMA_ENABLE_SESSION}")
+message(STATUS "  - Session Benchmarks: ${GEMMA_BUILD_SESSION_BENCH}")
+message(STATUS "  - Enhanced CLI: ${GEMMA_BUILD_ENHANCED_CLI}")
 message(STATUS "  - Backend Tests: ${GEMMA_BUILD_BACKEND_TESTS}")
 message(STATUS "  - Benchmarks: ${GEMMA_BUILD_BENCHMARKS}")
 message(STATUS "  - Documentation: ${GEMMA_BUILD_DOCS}")

@@ -38,6 +38,9 @@ if(GEMMA_USING_VCPKG)
   message(STATUS "[vcpkg] Root toolchain active inside gemma.cpp subproject")
 endif()
 
+# Centralized dependency management is handled by root CMakeLists.txt
+# Dependencies are resolved in cmake/Dependencies.cmake before this subproject
+
 project(gemma)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -46,7 +49,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Include optimization module
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
+include(VcpkgHelper)
+include(FindVcpkgPackages)
 include(GemmaOptimizations)
+
+# Note: Dependencies resolved by root CMakeLists.txt via cmake/Dependencies.cmake
 
 # Setup global build optimizations
 setup_gemma_build_optimizations()
@@ -58,92 +65,56 @@ option(GEMMA_ENABLE_LTO "Enable Link Time Optimization" ON)
 option(GEMMA_ENABLE_PCH "Enable Precompiled Headers" ON)
 option(GEMMA_REQUIRE_HWY_CONTRIB "Fail configuration if hwy_contrib (Highway contrib) is not available" OFF)
 
-if(GEMMA_PREFER_SYSTEM_DEPS)
-  # vcpkg exposes 'highway' as the target 'hwy'. Some ports also create hwy_contrib.
-  find_package(highway QUIET CONFIG)
+# Highway dependency should already be resolved by Dependencies.cmake
+if(NOT DEFINED GEMMA_HWY_LIBS)
+    message(FATAL_ERROR "GEMMA_HWY_LIBS not defined. Dependencies.cmake should have been included first.")
 endif()
 if(NOT TARGET hwy)
-  message(STATUS "highway not provided by system/vcpkg; fetching via FetchContent")
-  FetchContent_Declare(highway GIT_REPOSITORY https://github.com/google/highway.git GIT_TAG 1d16731233de45a365b43867f27d0a5f73925300 EXCLUDE_FROM_ALL)
-  FetchContent_MakeAvailable(highway)
+    message(FATAL_ERROR "Highway target 'hwy' not available. Check Dependencies.cmake resolution.")
 endif()
-# Collect Highway related targets (hwy is required, hwy_contrib optional).
-set(GEMMA_HWY_LIBS hwy)
-if(TARGET hwy_contrib)
-  list(APPEND GEMMA_HWY_LIBS hwy_contrib)
-else()
-  message(STATUS "highway contrib target (hwy_contrib) not available; continuing without it")
-  if(GEMMA_REQUIRE_HWY_CONTRIB)
-    message(FATAL_ERROR "GEMMA_REQUIRE_HWY_CONTRIB=ON but hwy_contrib target not found. Install full highway package or disable this option.")
-  endif()
+message(STATUS "Using Highway libraries: ${GEMMA_HWY_LIBS}")
+
+# SentencePiece dependency should already be resolved by Dependencies.cmake
+if(NOT DEFINED GEMMA_SENTENCEPIECE_LIB)
+    message(FATAL_ERROR "GEMMA_SENTENCEPIECE_LIB not defined. Dependencies.cmake should have been included first.")
+endif()
+if(NOT TARGET ${GEMMA_SENTENCEPIECE_LIB})
+    message(FATAL_ERROR "SentencePiece target '${GEMMA_SENTENCEPIECE_LIB}' not available. Check Dependencies.cmake resolution.")
+endif()
+message(STATUS "Using SentencePiece library: ${GEMMA_SENTENCEPIECE_LIB}")
+
+# nlohmann-json dependency should already be resolved by Dependencies.cmake
+if(NOT DEFINED GEMMA_JSON_LIB)
+    message(FATAL_ERROR "GEMMA_JSON_LIB not defined. Dependencies.cmake should have been included first.")
+endif()
+if(NOT TARGET ${GEMMA_JSON_LIB})
+    message(FATAL_ERROR "nlohmann-json target '${GEMMA_JSON_LIB}' not available. Check Dependencies.cmake resolution.")
+endif()
+message(STATUS "Using nlohmann-json library: ${GEMMA_JSON_LIB}")
+
+# Google Benchmark dependency handled by Dependencies.cmake (if GEMMA_BUILD_BENCHMARKS=ON)
+if(GEMMA_BUILD_BENCHMARKS)
+    if(NOT DEFINED GEMMA_BENCHMARK_LIB)
+        message(FATAL_ERROR "GEMMA_BENCHMARK_LIB not defined but GEMMA_BUILD_BENCHMARKS=ON. Check Dependencies.cmake.")
+    endif()
+    if(NOT TARGET ${GEMMA_BENCHMARK_LIB})
+        message(FATAL_ERROR "Benchmark target '${GEMMA_BENCHMARK_LIB}' not available. Check Dependencies.cmake resolution.")
+    endif()
+    message(STATUS "Using Google Benchmark library: ${GEMMA_BENCHMARK_LIB}")
 endif()
 
-## Note: absl needs to be installed by sentencepiece. This will only happen if
-## cmake is invoked with -DSPM_ENABLE_SHARED=OFF and -DSPM_ABSL_PROVIDER=module
-
-# Configure sentencepiece build options before fetching
-set(SPM_ENABLE_SHARED OFF CACHE BOOL "Disable shared libraries for sentencepiece")
-set(SPM_ABSL_PROVIDER "module" CACHE STRING "Use module provider for absl")
-set(SPM_BUILD_TEST OFF CACHE BOOL "Disable sentencepiece tests")
-set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "Disable tcmalloc")
-
-if(GEMMA_PREFER_SYSTEM_DEPS)
-  find_package(sentencepiece QUIET CONFIG)
-endif()
-if(NOT TARGET sentencepiece-static AND NOT TARGET sentencepiece)
-  message(STATUS "sentencepiece not found via system/vcpkg; using FetchContent")
-  FetchContent_Declare(sentencepiece
-    GIT_REPOSITORY https://github.com/google/sentencepiece
-    GIT_TAG 53de76561cfc149d3c01037f0595669ad32a5e7c
-    EXCLUDE_FROM_ALL
-  )
-  FetchContent_GetProperties(sentencepiece)
-  if(NOT sentencepiece_POPULATED)
-    message(STATUS "Fetching sentencepiece with CMake compatibility fixes...")
-    FetchContent_Populate(sentencepiece)
-    set(SENTENCEPIECE_CMAKE_FIX "${sentencepiece_SOURCE_DIR}/CMakeLists.txt.fixed")
-    file(READ "${sentencepiece_SOURCE_DIR}/CMakeLists.txt" SENTENCEPIECE_CMAKE_CONTENT)
-    string(REPLACE "cmake_minimum_required(VERSION 3.1 FATAL_ERROR)"
-                   "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)"
-                   SENTENCEPIECE_CMAKE_CONTENT "${SENTENCEPIECE_CMAKE_CONTENT}")
-    file(WRITE "${SENTENCEPIECE_CMAKE_FIX}" "${SENTENCEPIECE_CMAKE_CONTENT}")
-    file(RENAME "${SENTENCEPIECE_CMAKE_FIX}" "${sentencepiece_SOURCE_DIR}/CMakeLists.txt")
-    add_subdirectory(${sentencepiece_SOURCE_DIR} ${sentencepiece_BINARY_DIR} EXCLUDE_FROM_ALL)
-  endif()
-else()
-  message(STATUS "sentencepiece found via system/vcpkg: using existing target(s)")
-endif()
-
-if(GEMMA_PREFER_SYSTEM_DEPS)
-  find_package(nlohmann_json QUIET CONFIG)
-endif()
-if(NOT TARGET nlohmann_json::nlohmann_json)
-  message(STATUS "nlohmann_json not found via system/vcpkg; fetching")
-  FetchContent_Declare(json GIT_REPOSITORY https://github.com/nlohmann/json.git GIT_TAG 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03 EXCLUDE_FROM_ALL)
-  FetchContent_MakeAvailable(json)
-else()
-  message(STATUS "nlohmann_json found via system/vcpkg")
-endif()
-
-# Configure Google Benchmark (only if not already available)
-if(GEMMA_PREFER_SYSTEM_DEPS)
-  find_package(benchmark QUIET CONFIG)
-endif()
-if(NOT TARGET benchmark::benchmark)
-  message(STATUS "google benchmark not found via system/vcpkg; fetching")
-  set(BENCHMARK_ENABLE_TESTING OFF)
-  set(BENCHMARK_ENABLE_GTEST_TESTS OFF)
-  set(BENCHMARK_ENABLE_INSTALL OFF)
-
-  FetchContent_Declare(benchmark
-    GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG v1.8.2
-    EXCLUDE_FROM_ALL
-  )
-  FetchContent_MakeAvailable(benchmark)
-else()
-  message(STATUS "google benchmark found via system/vcpkg")
-endif()
+# ============================================================================
+# Package Detection Summary
+# ============================================================================
+message(STATUS "")
+message(STATUS "=== Package Detection Summary ===")
+vcpkg_package_status("Highway" "hwy")
+vcpkg_package_status("SentencePiece" "sentencepiece-static")
+vcpkg_package_status("nlohmann-json" "nlohmann_json::nlohmann_json")
+vcpkg_package_status("Google Benchmark" "benchmark::benchmark")
+message(STATUS "Backend Auto Detect (effective): ${GEMMA_ENABLE_AUTO_BACKENDS}")
+message(STATUS "=================================")
+message(STATUS "")
 
 # Base source files
 set(SOURCES
@@ -174,6 +145,8 @@ set(SOURCES
   gemma/kv_cache.h
   gemma/model_store.cc
   gemma/model_store.h
+  gemma/session.cc
+  gemma/session.h
   gemma/tensor_info.cc
   gemma/tensor_info.h
   gemma/tokenizer.cc
@@ -225,11 +198,21 @@ set(SOURCES
 option(GEMMA_DISABLE_GRIFFIN "Build without full Griffin recurrent layer (use stub)" OFF)
 option(GEMMA_EXCLUDE_ARCHIVE "Exclude .archive directory from packaging/install" ON)
 option(GEMMA_ENABLE_MCP "Build optional MCP server (requires mcp directory)" OFF)
-option(GEMMA_ENABLE_CUDA "Enable CUDA backend if available" ON)
-option(GEMMA_ENABLE_OPENCL "Enable OpenCL backend if available" ON)
-option(GEMMA_ENABLE_SYCL "Enable SYCL backend if available" ON)
+# Backend options (disabled for CPU-only build)
+option(GEMMA_ENABLE_CUDA "Enable CUDA backend if available" OFF)
+option(GEMMA_ENABLE_OPENCL "Enable OpenCL backend if available" OFF)
+option(GEMMA_ENABLE_SYCL "Enable SYCL backend if available" OFF)
 option(GEMMA_ENABLE_VULKAN "Enable Vulkan backend if available" OFF)
-option(GEMMA_ENABLE_AUTO_BACKENDS "Auto-detect and enable available GPU backends" ON)
+option(GEMMA_ENABLE_AUTO_BACKENDS "Auto-detect and enable available GPU backends" OFF)
+
+# Honor root alias GEMMA_AUTO_DETECT_BACKENDS if provided and subproject flag left default.
+if(DEFINED GEMMA_AUTO_DETECT_BACKENDS AND NOT DEFINED CACHE{GEMMA_ENABLE_AUTO_BACKENDS})
+  # Only adopt if user did not explicitly set GEMMA_ENABLE_AUTO_BACKENDS on command line.
+  if(NOT GEMMA_ENABLE_AUTO_BACKENDS AND GEMMA_AUTO_DETECT_BACKENDS)
+    set(GEMMA_ENABLE_AUTO_BACKENDS ON CACHE BOOL "(alias) Auto-detect and enable available GPU backends" FORCE)
+  endif()
+endif()
+option(GEMMA_FORCE_INTEL_COMPILER_FOR_SYCL "Force Intel compiler (icpx) for SYCL compilation when detected" ON)
 
 if(GEMMA_DISABLE_GRIFFIN)
   message(STATUS "GEMMA_DISABLE_GRIFFIN=ON: using gemma/griffin_stub.cc (no recurrent layer logic)")
@@ -253,7 +236,6 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-FetchContent_GetProperties(sentencepiece)
 
 ## Library Target
 
@@ -262,15 +244,13 @@ set_property(TARGET libgemma PROPERTY CXX_STANDARD 20)
 set_target_properties(libgemma PROPERTIES PREFIX "")
 set_property(TARGET libgemma PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(libgemma PUBLIC ./ ./gemma)
-if(TARGET sentencepiece-static)
-  set(GEMMA_SENTENCEPIECE_LIB sentencepiece-static)
-elseif(TARGET sentencepiece)
-  set(GEMMA_SENTENCEPIECE_LIB sentencepiece)
-else()
-  message(FATAL_ERROR "SentencePiece library target not found")
+# GEMMA_SENTENCEPIECE_LIB should already be set by Dependencies.cmake
+if(NOT DEFINED GEMMA_SENTENCEPIECE_LIB)
+    message(FATAL_ERROR "GEMMA_SENTENCEPIECE_LIB not defined. Dependencies.cmake should have been included first.")
 endif()
 
-target_link_libraries(libgemma ${GEMMA_HWY_LIBS} ${GEMMA_SENTENCEPIECE_LIB})
+find_package(Threads REQUIRED)
+target_link_libraries(libgemma ${GEMMA_HWY_LIBS} ${GEMMA_SENTENCEPIECE_LIB} ${GEMMA_JSON_LIB} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS} ${GEMMA_BACKEND_LIBS})
 target_include_directories(libgemma PUBLIC ${sentencepiece_SOURCE_DIR})
 target_compile_definitions(libgemma PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS NOMINMAX>)
 target_compile_options(libgemma PRIVATE $<$<AND:$<PLATFORM_ID:Windows>,$<CXX_COMPILER_ID:Clang>>:-Wno-deprecated-declarations>)
@@ -423,6 +403,15 @@ if(GEMMA_ENABLE_SYCL)
           if(IntelSYCL_LIBRARY MATCHES "sycl-devicelib-host")
             message(WARNING "Using device library variant (${IntelSYCL_LIBRARY}); linking may require full SYCL import library in some configurations")
           endif()
+
+          # Optionally force Intel compiler globally for SYCL compilation
+          if(GEMMA_FORCE_INTEL_COMPILER_FOR_SYCL AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+            message(STATUS "GEMMA_FORCE_INTEL_COMPILER_FOR_SYCL=ON: Setting CMAKE_CXX_COMPILER to ${IntelSYCL_COMPILER}")
+            set(CMAKE_CXX_COMPILER "${IntelSYCL_COMPILER}" CACHE FILEPATH "Forced Intel compiler for SYCL" FORCE)
+            # Note: This change will take effect for targets created after this point
+            message(WARNING "Compiler change requires clean rebuild. Consider setting CMAKE_CXX_COMPILER before project() call for best results.")
+          endif()
+
           break()
         endif()
       endforeach()
@@ -449,10 +438,24 @@ if(GEMMA_ENABLE_SYCL)
 
   if(IntelSYCL_FOUND)
     message(STATUS "Enabling SYCL backend")
+
+    # Pass Intel compiler information to SYCL backend
+    set(GEMMA_SYCL_COMPILER "${IntelSYCL_COMPILER}" CACHE INTERNAL "Intel SYCL compiler path")
+    set(GEMMA_SYCL_INCLUDE_DIR "${IntelSYCL_INCLUDE_DIR}" CACHE INTERNAL "Intel SYCL include directory")
+    set(GEMMA_SYCL_LIBRARY "${IntelSYCL_LIBRARY}" CACHE INTERNAL "Intel SYCL library")
+
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../backends/sycl ${CMAKE_BINARY_DIR}/backends_sycl)
     if(TARGET gemma_sycl_backend)
       list(APPEND GEMMA_BACKEND_LIBS gemma_sycl_backend)
       target_compile_definitions(libgemma PUBLIC GEMMA_ENABLE_SYCL)
+
+      # Force Intel compiler for SYCL backend target
+      if(IntelSYCL_COMPILER AND EXISTS "${IntelSYCL_COMPILER}")
+        set_target_properties(gemma_sycl_backend PROPERTIES
+          CXX_COMPILER "${IntelSYCL_COMPILER}"
+        )
+        message(STATUS "SYCL backend configured to use Intel compiler: ${IntelSYCL_COMPILER}")
+      endif()
     else()
       message(WARNING "SYCL backend sources did not produce target 'gemma_sycl_backend'")
     endif()
@@ -503,7 +506,19 @@ endif()
 # Apply comprehensive optimizations
 apply_gemma_optimizations(libgemma)
 
-install(TARGETS libgemma DESTINATION lib)
+# Set proper output directories for library
+set_target_properties(libgemma PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+)
+
+# Install library target
+install(TARGETS libgemma
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Development
+)
 
 # Optionally skip archived sources (they are not in target, but avoid packaging docs)
 if(GEMMA_EXCLUDE_ARCHIVE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.archive)
@@ -524,6 +539,11 @@ target_link_libraries(gemma_shared PRIVATE
   $<LINK_LIBRARY:WHOLE_ARCHIVE,hwy>
   $<LINK_LIBRARY:WHOLE_ARCHIVE,hwy_contrib>
   $<LINK_LIBRARY:WHOLE_ARCHIVE,${GEMMA_SENTENCEPIECE_LIB}>
+  Threads::Threads
+  ${GEMMA_JSON_LIB}
+  ${GEMMA_BENCHMARK_LIB}
+  ${GEMMA_GTEST_LIBS}
+  ${GEMMA_BACKEND_LIBS}
 )
 target_include_directories(gemma_shared PUBLIC ${sentencepiece_SOURCE_DIR})
 target_compile_definitions(gemma_shared 
@@ -532,26 +552,64 @@ target_compile_definitions(gemma_shared
     $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS NOMINMAX>
 )
 target_compile_options(gemma_shared PRIVATE $<$<AND:$<PLATFORM_ID:Windows>,$<CXX_COMPILER_ID:Clang>>:-Wno-deprecated-declarations>)
-install(TARGETS gemma_shared DESTINATION lib)
-install(FILES gemma/c_api.h DESTINATION include/gemma)
-install(FILES gemma/GemmaInterop.cs DESTINATION include/gemma)
+
+# Set proper output directories for shared library
+set_target_properties(gemma_shared PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}
+)
+
+# Install shared library and headers
+install(TARGETS gemma_shared
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Runtime
+)
+install(FILES gemma/c_api.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gemma)
+install(FILES gemma/GemmaInterop.cs DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gemma)
 endif()
 
 # Executable Target
 
-add_executable(gemma gemma/run.cc)
-target_link_libraries(gemma libgemma ${GEMMA_HWY_LIBS} ${GEMMA_BACKEND_LIBS})
+add_executable(gemma run.cc)
+target_link_libraries(gemma libgemma ${GEMMA_HWY_LIBS} ${GEMMA_SENTENCEPIECE_LIB} ${GEMMA_BACKEND_LIBS} Threads::Threads ${GEMMA_JSON_LIB} ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS})
 apply_gemma_optimizations(gemma)
-install(TARGETS gemma DESTINATION bin)
+
+# Ensure gemma executable goes to proper output directory
+set_target_properties(gemma PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
+
+# Install target
+install(TARGETS gemma
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Runtime
+)
 
 add_executable(single_benchmark evals/benchmark.cc)
-target_link_libraries(single_benchmark libgemma ${GEMMA_HWY_LIBS} nlohmann_json::nlohmann_json ${GEMMA_BACKEND_LIBS})
+target_link_libraries(single_benchmark libgemma ${GEMMA_HWY_LIBS} ${GEMMA_JSON_LIB} ${GEMMA_BACKEND_LIBS} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS})
+set_target_properties(single_benchmark PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
 
 add_executable(benchmarks evals/benchmarks.cc)
-target_link_libraries(benchmarks libgemma ${GEMMA_HWY_LIBS} nlohmann_json::nlohmann_json benchmark ${GEMMA_BACKEND_LIBS})
+if(GEMMA_BUILD_BENCHMARKS AND DEFINED GEMMA_BENCHMARK_LIB)
+    target_link_libraries(benchmarks libgemma ${GEMMA_HWY_LIBS} ${GEMMA_JSON_LIB} ${GEMMA_BENCHMARK_LIB} ${GEMMA_BACKEND_LIBS} Threads::Threads ${GEMMA_GTEST_LIBS})
+else()
+    # Fallback for when benchmarks are built without proper dependency resolution
+    target_link_libraries(benchmarks libgemma ${GEMMA_HWY_LIBS} ${GEMMA_JSON_LIB} ${GEMMA_BACKEND_LIBS} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS})
+endif()
+set_target_properties(benchmarks PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
 
 add_executable(debug_prompt evals/debug_prompt.cc)
-target_link_libraries(debug_prompt libgemma ${GEMMA_HWY_LIBS} nlohmann_json::nlohmann_json ${GEMMA_BACKEND_LIBS})
+target_link_libraries(debug_prompt libgemma ${GEMMA_HWY_LIBS} ${GEMMA_JSON_LIB} ${GEMMA_BACKEND_LIBS} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS})
+set_target_properties(debug_prompt PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
 
 ## Tests
 set(GEMMA_ENABLE_TESTS OFF CACHE BOOL "Enable Gemma tests")
@@ -589,13 +647,19 @@ foreach (TESTFILE IN LISTS GEMMA_TEST_FILES)
   # that include us may set them.
   target_compile_options(${TESTNAME} PRIVATE -DHWY_IS_TEST=1)
 
-  target_link_libraries(${TESTNAME} PRIVATE libgemma GTest::Main ${GEMMA_HWY_LIBS} hwy_test)
+  target_link_libraries(${TESTNAME} PRIVATE libgemma GTest::Main ${GEMMA_HWY_LIBS} hwy_test Threads::Threads ${GEMMA_JSON_LIB} ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS} ${GEMMA_BACKEND_LIBS})
 
   gtest_discover_tests(${TESTNAME})
 endforeach ()
 
 add_executable(gemma_batch_bench evals/gemma_batch_bench.cc)
-target_link_libraries(gemma_batch_bench libgemma GTest::Main ${GEMMA_HWY_LIBS} nlohmann_json::nlohmann_json)
+if(GEMMA_ENABLE_TESTS AND DEFINED GEMMA_GTEST_LIBS)
+    list(GET GEMMA_GTEST_LIBS 1 GEMMA_GTEST_MAIN)  # gtest_main is second element
+    target_link_libraries(gemma_batch_bench libgemma ${GEMMA_GTEST_MAIN} ${GEMMA_HWY_LIBS} ${GEMMA_JSON_LIB} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_BACKEND_LIBS})
+else()
+    # Fallback for when tests are built without proper dependency resolution
+    target_link_libraries(gemma_batch_bench libgemma ${GEMMA_HWY_LIBS} ${GEMMA_JSON_LIB} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_BACKEND_LIBS})
+endif()
 
 endif()  # GEMMA_ENABLE_TESTS
 
@@ -611,7 +675,16 @@ endif()
 ## Tools
 
 add_executable(migrate_weights io/migrate_weights.cc)
-target_link_libraries(migrate_weights libgemma ${GEMMA_HWY_LIBS})
+target_link_libraries(migrate_weights libgemma ${GEMMA_HWY_LIBS} Threads::Threads)
+set_target_properties(migrate_weights PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+)
+
+# Install tools
+install(TARGETS migrate_weights
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Tools
+)
 
 # Optional MCP server component
 if(GEMMA_ENABLE_MCP)
@@ -634,6 +707,10 @@ message(STATUS "Griffin Disabled: ${GEMMA_DISABLE_GRIFFIN}")
 message(STATUS "Archive Excluded: ${GEMMA_EXCLUDE_ARCHIVE}")
 message(STATUS "Auto Backend Detect: ${GEMMA_ENABLE_AUTO_BACKENDS}")
 message(STATUS "SYCL Enabled (requested): ${GEMMA_ENABLE_SYCL}")
+if(IntelSYCL_FOUND)
+  message(STATUS "SYCL Compiler: ${IntelSYCL_COMPILER}")
+  message(STATUS "SYCL Force Intel Compiler: ${GEMMA_FORCE_INTEL_COMPILER_FOR_SYCL}")
+endif()
 message(STATUS "CUDA Enabled (requested): ${GEMMA_ENABLE_CUDA}")
 message(STATUS "Vulkan Enabled (requested): ${GEMMA_ENABLE_VULKAN}")
 message(STATUS "OpenCL Enabled (requested): ${GEMMA_ENABLE_OPENCL}")

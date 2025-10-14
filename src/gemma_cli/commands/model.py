@@ -545,10 +545,9 @@ def use(model_name: str, set_paths: bool) -> None:
                     raise click.Abort()
 
         # Update configuration
-        config_manager = ConfigManager()
-        config = config_manager.load()
-        config.model.default_model = model_name
-        config_manager.save(config)
+        config = load_config()
+        config.gemma.default_model = model_name
+        ConfigManager().save(config)
 
         console.print(
             format_success_message(

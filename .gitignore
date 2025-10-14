@@ -14,6 +14,19 @@ CMakeCache.txt
 cmake_install.cmake
 install_manifest.txt
 
+# Prevent any binaries in source directories
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+!third_party/**/*.dll
+!third_party/**/*.so
+!third_party/**/*.dylib
+!third_party/**/*.a
+!third_party/**/*.lib
+
 # Explicitly include GitHub workflows directory
 !/.github/
 
@@ -185,4 +198,23 @@ tmp_*
 *.local
 *_temp/
 *_tmp/
+
+# Additional ignores to reduce editor file watching load
+third_party/**/build/
+third_party/**/bin/
+third_party/**/lib/
+third_party/**/.cache/
+**/.cmake/api/*
+**/.cache/**
+compile_commands.json
+compile_commands-full.json
+**/CMakeUserPresets.json
+**/.clangd/
+**/.ruff_cache/
+**/.pytest_cache/
+**/.ninja_log
+**/.ninja_deps
+**/Testing/Temporary/
+**/Testing/**/CTestCostData.txt
+**/Testing/**/LastTest.log
 

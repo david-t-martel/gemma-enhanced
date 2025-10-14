@@ -5,12 +5,12 @@ import sys
 from pathlib import Path
 
 import click
-from rich.console import Console
-
-from .commands.setup import config, health, init, reset, tutorial
+from .commands.setup import setup_group
 from .commands.model import model, profile
 
-console = Console()
+from rich.console import Console
+
+console = Console() 
 
 # Version info
 __version__ = "2.0.0"
@@ -205,6 +205,7 @@ async def _run_chat_session(
         gemma = GemmaInterface(
             model_path=model_path,
             tokenizer_path=tokenizer_path,
+            gemma_executable=settings.gemma.executable_path if settings.gemma else "C:\\codedev\\llm\\gemma\\build-avx2-sycl\\bin\\RELEASE\\gemma.exe",
             max_tokens=max_tokens,
             temperature=temperature,
         )
@@ -507,6 +508,7 @@ async def _run_single_query(
         gemma = GemmaInterface(
             model_path=model_path,
             tokenizer_path=tokenizer_path,
+            gemma_executable=settings.gemma.executable_path if settings.gemma else "C:\\codedev\\llm\\gemma\\build-avx2-sycl\\bin\\RELEASE\\gemma.exe",
             max_tokens=max_tokens,
             temperature=temperature,
         )
@@ -724,12 +726,7 @@ async def _show_memory_stats(
         sys.exit(1)
 
 
-# Register setup commands
-cli.add_command(init)
-cli.add_command(health)
-cli.add_command(tutorial)
-cli.add_command(reset)
-cli.add_command(config)
+cli.add_command(setup_group)
 
 # Register model management commands (Phase 4)
 cli.add_command(model)

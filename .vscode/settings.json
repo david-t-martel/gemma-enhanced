@@ -1,16 +1,24 @@
 {
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/build/**": false,
+    "**/build-windows-release/**": false
+  },
   "files.exclude": {
-    "**/CMakeFiles": true,
-    "**/CMakeCache.txt": true,
-    "**/build/": true,
-    "**/build-*": true,
-    "**/.git/": true,
-    "**/.cache": true
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/build": false,
+    "**/build-windows-release": false
   },
   "cmake.sourceDirectory": "${workspaceFolder}",
   "cmake.configureOnOpen": true,
   "cmake.generator": "Ninja",
-  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.buildDirectory": "${workspaceFolder}/build-windows-release",
   "cmake.configureSettings": {
     "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
     "GEMMA_BUILD_ENHANCED_TESTS": "ON",
@@ -20,8 +28,9 @@
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "C_Cpp.default.cppStandard": "c++20",
   "C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build-windows-release/compile_commands.json",
   "C_Cpp.errorSquiggles": "enabled",
+  "C_Cpp.intelliSenseEngineFallback": "Disabled",
   "C_Cpp.clang_format_style": "file",
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
@@ -39,11 +48,25 @@
   "python.testing.unittestEnabled": false,
   "python.testing.pytestArgs": ["tests"],
   "ruff.enable": true,
-  "search.exclude": { "**/build": true, "**/compile_commands.json": true },
+  "search.exclude": {
+    "**/build": true,
+    "**/build-*": true,
+    "**/compile_commands.json": true,
+    "third_party/**/build": true,
+    "third_party/**/bin": true,
+    "third_party/**/lib": true,
+    "**/CMakeFiles": true
+  },
+  "C_Cpp.files.exclude": {
+    "third_party/**/build": true,
+    "third_party/**/bin": true,
+    "third_party/**/lib": true
+  },
+  "C_Cpp.loggingLevel": "Warning",
   "markdownlint.config": {
     "MD013": false
   },
-  "doxdocgen.generic.authorTag": false,
+  "doxdocgen.generic.authorTag": "",
   "doxdocgen.file.copyrightTag": "(c) 2025 Gemma Contributors",
   "doxdocgen.file.customTag": ["@file"],
   "bazel.buildifierFixOnFormat": true,
