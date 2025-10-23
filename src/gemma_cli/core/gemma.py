@@ -1,11 +1,39 @@
 """Gemma inference interface using native Windows executable."""
 
 import asyncio
+
 import os
+
 import subprocess
+
 from collections.abc import Callable
+
 from pathlib import Path
+
 from typing import Optional
+
+import logging
+
+
+
+from pydantic import BaseModel, Field, PositiveInt, NonNegativeFloat
+
+
+
+# Configure logging
+
+logger = logging.getLogger(__name__)
+
+
+
+class GemmaRuntimeParams(BaseModel):
+    """Runtime parameters for Gemma model inference."""
+    model_path: str = Field(..., description="Path to the model weights file (.sbs)")
+    tokenizer_path: Optional[str] = Field(None, description="Path to tokenizer file (.spm), optional for single-file models")
+    gemma_executable: Optional[str] = Field(None, description="Path to gemma.exe binary. If None, auto-discovered.")
+    max_tokens: PositiveInt = Field(2048, description="Maximum tokens to generate", gt=0)
+    temperature: NonNegativeFloat = Field(0.7, description="Sampling temperature (0.0 to 2.0)", ge=0.0, le=2.0)
+    debug_mode: bool = Field(False, description="Enable debug mode with verbose output")
 
 
 class GemmaInterface:
@@ -19,51 +47,28 @@ class GemmaInterface:
 
     def __init__(
         self,
-        model_path: str,
-        tokenizer_path: Optional[str] = None,
-        gemma_executable: Optional[str] = None,
-        max_tokens: int = 2048,
-        temperature: float = 0.7,
+        params: GemmaRuntimeParams
     ) -> None:
         """
-        Initialize the Gemma interface.
+        Initialize the Gemma interface with structured runtime parameters.
 
         Args:
-            model_path: Path to the model weights file (.sbs)
-            tokenizer_path: Path to tokenizer file (.spm), optional for single-file models
-            gemma_executable: Path to gemma.exe binary. If None, searches:
-                1. GEMMA_EXECUTABLE environment variable
-                2. Common build directories (./build/Release/, ./build-avx2-sycl/, etc.)
-                3. PATH environment
-            max_tokens: Maximum tokens to generate
-            temperature: Sampling temperature (0.0 to 2.0)
-
-        Raises:
-            FileNotFoundError: If gemma executable doesn't exist or can't be found
-
-        Example:
-            >>> # Use environment variable
-            >>> os.environ['GEMMA_EXECUTABLE'] = '/path/to/gemma.exe'
-            >>> gemma = GemmaInterface(model_path)
-            >>>
-            >>> # Explicit path
-            >>> gemma = GemmaInterface(model_path, gemma_executable='/custom/path/gemma.exe')
-            >>>
-            >>> # Auto-discovery (searches standard locations)
-            >>> gemma = GemmaInterface(model_path)  # Uses PATH or build/
+            params: An instance of GemmaRuntimeParams containing all necessary configuration.
         """
-        self.model_path = os.path.normpath(model_path)
-        self.tokenizer_path = os.path.normpath(tokenizer_path) if tokenizer_path else None
+        self.model_path = os.path.normpath(params.model_path)
+        self.tokenizer_path = os.path.normpath(params.tokenizer_path) if params.tokenizer_path else None
 
-        # Auto-discover executable if not provided
-        if gemma_executable is None:
+        # Auto-discover executable if not provided in params
+        if params.gemma_executable is None:
             gemma_executable = self._find_gemma_executable()
+        else:
+            gemma_executable = params.gemma_executable
 
         self.gemma_executable = os.path.normpath(gemma_executable)
-        self.max_tokens = max_tokens
-        self.temperature = temperature
+        self.max_tokens = params.max_tokens
+        self.temperature = params.temperature
         self.process: Optional[subprocess.Popen] = None
-        self.debug_mode = False
+        self.debug_mode = params.debug_mode
 
         # Verify executable exists
         if not os.path.exists(self.gemma_executable):
@@ -94,6 +99,11 @@ class GemmaInterface:
             if Path(gemma_path).exists():
                 return gemma_path
 
+        # TODO: [Deployment] Integrate uvx binary wrapper for gemma.exe execution.
+        # This would provide a more controlled environment for the C++ executable.
+        # TODO: [Executable Discovery] Enhance _find_gemma_executable to check for bundled gemma.exe
+        # within the application's installation directory (e.g., PyInstaller output).
+
         # 2. Search common build directories
         # User-provided path is now the first search path
         search_paths = [
@@ -112,6 +122,11 @@ class GemmaInterface:
         if gemma_path := shutil.which(exe_name):
             return gemma_path
 
+        logger.error(
+            f"'{exe_name}' not found. Searched environment variables, "
+            f"common build directories, and system PATH. Please ensure gemma.exe is built "
+            f"and its location is in the system PATH or set via GEMMA_EXECUTABLE."
+        )
         raise FileNotFoundError(
             f"'{exe_name}' not found. Searched environment variables, "
             f"common build directories, and system PATH. Please ensure gemma.exe is built "
@@ -194,7 +209,7 @@ class GemmaInterface:
 
         # Debug: print command if enabled
         if self.debug_mode:
-            print(f"Debug - Command: {' '.join(cmd)}")
+            logger.debug(f"Command: {' '.join(cmd)}")
 
         try:
             # Use asyncio subprocess for proper async handling
@@ -234,7 +249,7 @@ class GemmaInterface:
 
                     except (OSError, UnicodeDecodeError) as e:
                         if self.debug_mode:
-                            print(f"Debug - Read error: {e}")
+                            logger.debug(f"Read error: {e}")
                         break
 
             # Wait for process completion
@@ -273,7 +288,7 @@ class GemmaInterface:
                         await self.process.wait()
             except (OSError, ProcessLookupError) as e:
                 if self.debug_mode:
-                    print(f"Debug - Cleanup error: {e}")
+                    logger.debug(f"Cleanup error: {e}")
             finally:
                 self.process = None
 
@@ -311,3 +326,27 @@ class GemmaInterface:
             "temperature": self.temperature,
             "debug_mode": self.debug_mode,
         }
+
+
+def create_gemma_interface(params: GemmaRuntimeParams, use_optimized: bool = True) -> GemmaInterface:
+    """
+    Create a Gemma interface based on configuration settings.
+
+    Args:
+        params: Runtime parameters for Gemma model
+        use_optimized: Whether to use optimized interface (default: True)
+
+    Returns:
+        GemmaInterface or OptimizedGemmaInterface instance
+    """
+    if use_optimized:
+        try:
+            from gemma_cli.core.optimized_gemma import OptimizedGemmaInterface
+            logger.info("Using OptimizedGemmaInterface with streaming and process reuse")
+            return OptimizedGemmaInterface(params=params)
+        except ImportError as e:
+            logger.warning(f"Failed to import OptimizedGemmaInterface: {e}, falling back to standard interface")
+            return GemmaInterface(params=params)
+    else:
+        logger.info("Using standard GemmaInterface")
+        return GemmaInterface(params=params)

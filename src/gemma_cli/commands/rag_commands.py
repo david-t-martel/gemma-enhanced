@@ -14,6 +14,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+import logging
 
 import click
 from rich.console import Console
@@ -24,7 +25,11 @@ from rich.table import Table
 from gemma_cli.config.settings import Settings, load_config
 from gemma_cli.rag.memory import MemoryTier
 from gemma_cli.rag.python_backend import PythonRAGBackend
+from gemma_cli.rag.hybrid_rag import RecallMemoriesParams, StoreMemoryParams, IngestDocumentParams
 
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Initialization and Helpers (Stateless)
@@ -53,8 +58,8 @@ def load_settings_or_default() -> Settings:
     try:
         return load_config()
     except (FileNotFoundError, ValueError) as e:
-        console.print(f"[red]Error loading config:[/red] {e}")
-        console.print("[yellow]Using default settings[/yellow]")
+        logger.error(f"Error loading config: {e}")
+        logger.warning("Using default settings")
         return Settings()
 
 
@@ -78,10 +83,10 @@ async def create_rag_backend(settings: Settings, console: Console) -> PythonRAGB
         pool_size=settings.redis.pool_size,
     )
     if not await backend.initialize():
-        console.print("[red]Failed to initialize RAG backend[/red]")
-        console.print(
-            f"[yellow]Make sure Redis is running on "
-            f"{settings.redis.host}:{settings.redis.port}[/yellow]"
+        logger.error("Failed to initialize RAG backend")
+        logger.error(
+            f"Make sure Redis is running on "
+            f"{settings.redis.host}:{settings.redis.port}"
         )
         raise click.Abort()
     return backend
@@ -204,7 +209,7 @@ def memory_dashboard(refresh: int):
 
                 time.sleep(refresh)
         except KeyboardInterrupt:
-            console.print("\n[yellow]Dashboard stopped[/yellow]")
+            logger.info("Dashboard stopped")
     else:
         asyncio.run(_show_dashboard())
 
@@ -238,11 +243,12 @@ def recall_command(query: str, tier: Optional[str], limit: int):
             console=console,
         ) as progress:
             task = progress.add_task(f"Searching {tier or 'all tiers'}...", total=None)
-            results = await backend.recall_memories(query, tier, limit)
+            recall_params = RecallMemoriesParams(query=query, memory_type=tier, limit=limit)
+            results = await backend.recall_memories(params=recall_params)
             progress.stop()
 
         if not results:
-            console.print(f"[yellow]No memories found for query: {query}[/yellow]")
+            logger.warning(f"No memories found for query: {query}")
             return
 
         console.print(f"\n[green]Found {len(results)} relevant memories:[/green]\n")
@@ -291,7 +297,7 @@ def store_command(text: str, tier: str, importance: float, tags: tuple[str, ...]
 
         # Validate importance range
         if not 0.0 <= importance <= 1.0:
-            console.print("[red]Importance must be between 0.0 and 1.0[/red]")
+            logger.error("Importance must be between 0.0 and 1.0")
             raise click.Abort()
 
         with Progress(
@@ -300,9 +306,13 @@ def store_command(text: str, tier: str, importance: float, tags: tuple[str, ...]
             console=console,
         ) as progress:
             task = progress.add_task("Storing memory...", total=None)
-            entry_id = await backend.store_memory(
-                text, tier, importance, list(tags) if tags else None
+            store_params = StoreMemoryParams(
+                content=text,
+                memory_type=tier,
+                importance=importance,
+                tags=list(tags) if tags else None
             )
+            entry_id = await backend.store_memory(params=store_params)
             progress.stop()
 
         if entry_id:
@@ -310,7 +320,7 @@ def store_command(text: str, tier: str, importance: float, tags: tuple[str, ...]
             console.print(f"[dim]ID: {entry_id[:12]}...[/dim]")
             console.print(f"[dim]Tier: {tier}[/dim]")
         else:
-            console.print("[red]Failed to store memory[/red]")
+            logger.error("Failed to store memory")
 
     asyncio.run(_store())
 
@@ -350,13 +360,16 @@ def search_command(query: str, tier: Optional[str], min_importance: float):
             console=console,
         ) as progress:
             task = progress.add_task("Searching...", total=None)
-            results = await backend.search_memories(query, tier, min_importance)
+            search_params = SearchParams(query=query, memory_type=tier, min_importance=min_importance)
+            results = await backend.search_memories(params=search_params)
+            # TODO: [RAG Backend] Implement a Pydantic model for search_memories parameters
+            # and update the backend call to use it. (This is already done, but keeping the TODO for clarity)
             progress.stop()
 
         if not results:
-            console.print(f"[yellow]No memories found matching: {query}[/yellow]")
+            logger.warning(f"No memories found matching: {query}")
             if min_importance > 0:
-                console.print(f"[dim]With minimum importance: {min_importance}[/dim]")
+                logger.debug(f"With minimum importance: {min_importance}")
             return
 
         console.print(f"\n[green]Found {len(results)} matching memories:[/green]\n")
@@ -401,7 +414,7 @@ def ingest_command(file_path: str, tier: str, chunk_size: int):
         path = Path(file_path)
 
         if not path.exists():
-            console.print(f"[red]File not found: {file_path}[/red]")
+            logger.error(f"File not found: {file_path}")
             raise click.Abort()
 
         console.print(f"[cyan]Ingesting document:[/cyan] {path.name}")
@@ -413,13 +426,14 @@ def ingest_command(file_path: str, tier: str, chunk_size: int):
             console=console,
         ) as progress:
             task = progress.add_task("Processing document...", total=None)
-            chunks_stored = await backend.ingest_document(file_path, tier, chunk_size)
+            ingest_params = IngestDocumentParams(file_path=file_path, memory_type=tier, chunk_size=chunk_size)
+            chunks_stored = await backend.ingest_document(params=ingest_params)
             progress.stop()
 
         if chunks_stored > 0:
             console.print(f"\n[green]✓ Successfully ingested {chunks_stored} chunks[/green]")
         else:
-            console.print("\n[red]Failed to ingest document[/red]")
+            logger.error("Failed to ingest document")
 
     asyncio.run(_ingest())
 
@@ -440,7 +454,7 @@ def cleanup_command(dry_run: bool):
         backend = await get_rag_backend()
 
         if dry_run:
-            console.print("[yellow]DRY RUN: No entries will be deleted[/yellow]\n")
+            logger.warning("DRY RUN: No entries will be deleted")
 
         with Progress(
             SpinnerColumn(),
@@ -462,7 +476,7 @@ def cleanup_command(dry_run: bool):
                 if cleaned > 0:
                     console.print(f"\n[green]✓ Cleaned up {cleaned} expired entries[/green]")
                 else:
-                    console.print("\n[dim]No expired entries found[/dim]")
+                    logger.info("No expired entries found")
 
     asyncio.run(_cleanup())
 
@@ -480,12 +494,12 @@ def consolidate_command(force: bool):
         gemma /consolidate --force
     """
     async def _consolidate():
-        console.print("[yellow]Note: Full consolidation not yet implemented[/yellow]")
-        console.print("[dim]This will be available in Phase 2B[/dim]")
+        logger.warning("Note: Full consolidation not yet implemented")
+        logger.info("This will be available in Phase 2B")
 
         # Placeholder for future implementation
         if force:
-            console.print("[cyan]Force flag noted for future implementation[/cyan]")
+            logger.info("Force flag noted for future implementation")
 
     asyncio.run(_consolidate())
 
@@ -493,6 +507,10 @@ def consolidate_command(force: bool):
 # ============================================================================
 # MCP Commands Group
 # ============================================================================
+
+# TODO: [MCP Integration] Implement full MCP client functionality for connecting to
+# and interacting with MCP servers. This includes dynamic tool discovery,
+# execution, and result handling.
 
 
 @click.group()
@@ -513,10 +531,8 @@ def mcp_status():
     Examples:
         gemma /mcp status
     """
-    console.print("[yellow]Note: MCP integration not yet implemented[/yellow]")
-    console.print("[dim]This will be available in Phase 2B[/dim]")
-
-    # Placeholder table
+    logger.warning("Note: MCP integration not yet implemented")
+    logger.info("This will be available in Phase 2B")
     table = Table(title="MCP Server Status")
     table.add_column("Server", style="cyan")
     table.add_column("Status", style="green")
@@ -539,9 +555,8 @@ def mcp_list(item_type: str):
         gemma /mcp list tools
         gemma /mcp list resources
     """
-    console.print(f"[cyan]Listing MCP {item_type}...[/cyan]")
-    console.print("[yellow]Note: MCP integration not yet implemented[/yellow]")
-    console.print("[dim]This will be available in Phase 2B[/dim]")
+    logger.warning("Note: MCP integration not yet implemented")
+    logger.info("This will be available in Phase 2B")
 
 
 @mcp_commands.command("call")
@@ -555,9 +570,8 @@ def mcp_call(server: str, tool: str, args: tuple[str, ...]):
         gemma /mcp call filesystem read_file /path/to/file.txt
         gemma /mcp call redis-cache get key123
     """
-    console.print(f"[cyan]Calling {server}.{tool} with {len(args)} arguments[/cyan]")
-    console.print("[yellow]Note: MCP integration not yet implemented[/yellow]")
-    console.print("[dim]This will be available in Phase 2B[/dim]")
+    logger.warning("Note: MCP integration not yet implemented")
+    logger.info("This will be available in Phase 2B")
 
 
 @mcp_commands.command("connect")
@@ -570,8 +584,8 @@ def mcp_connect(server: str):
         gemma /mcp connect redis-cache
     """
     console.print(f"[cyan]Connecting to MCP server: {server}[/cyan]")
-    console.print("[yellow]Note: MCP integration not yet implemented[/yellow]")
-    console.print("[dim]This will be available in Phase 2B[/dim]")
+    logger.warning("Note: MCP integration not yet implemented")
+    logger.info("This will be available in Phase 2B")
 
 
 @mcp_commands.command("disconnect")
@@ -583,9 +597,8 @@ def mcp_disconnect(server: str):
         gemma /mcp disconnect filesystem
         gemma /mcp disconnect redis-cache
     """
-    console.print(f"[cyan]Disconnecting from MCP server: {server}[/cyan]")
-    console.print("[yellow]Note: MCP integration not yet implemented[/yellow]")
-    console.print("[dim]This will be available in Phase 2B[/dim]")
+    logger.warning("Note: MCP integration not yet implemented")
+    logger.info("This will be available in Phase 2B")
 
 
 @mcp_commands.command("health")
@@ -602,8 +615,8 @@ def mcp_health(server: Optional[str]):
     else:
         console.print("[cyan]Health check for all MCP servers[/cyan]")
 
-    console.print("[yellow]Note: MCP integration not yet implemented[/yellow]")
-    console.print("[dim]This will be available in Phase 2B[/dim]")
+    logger.warning("Note: MCP integration not yet implemented")
+    logger.info("This will be available in Phase 2B")
 
 
 # ============================================================================

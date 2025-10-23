@@ -88,11 +88,11 @@ fast-embedding = [
 ]
 
 ffi = [
-    "rag-redis-system>=0.1.0",  # Rust FFI bindings (if available)
+    # "rag-redis-system>=0.1.0",  # Rust FFI bindings (commented out - not available yet)
 ]
 
 all = [
-    "gemma-cli[dev,ml,fast-embedding,ffi]",
+    "gemma-cli[dev,ml,fast-embedding]",  # Removed ffi from all until rag-redis-system is available
 ]
 
 [project.scripts]

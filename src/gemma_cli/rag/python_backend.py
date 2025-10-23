@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Optional
+import logging
 
 import aiofiles
 import numpy as np
@@ -12,6 +13,12 @@ import redis.asyncio as aioredis
 from redis.asyncio import ConnectionPool
 
 from gemma_cli.rag.memory import MemoryEntry, MemoryTier
+from gemma_cli.rag.params import RecallMemoriesParams, StoreMemoryParams, IngestDocumentParams, SearchParams
+from gemma_cli.rag.embedded_vector_store import EmbeddedVectorStore
+from gemma_cli.rag.optimized_embedded_store import OptimizedEmbeddedVectorStore
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Check for optional dependencies
 try:
@@ -30,7 +37,11 @@ except ImportError:
 
 
 class PythonRAGBackend:
-    """Python-based RAG system with 5-tier memory architecture (fallback implementation)."""
+    """Python-based RAG system with 5-tier memory architecture.
+
+    Supports both Redis and embedded vector store backends. By default, uses
+    embedded store for standalone operation without external dependencies.
+    """
 
     # Memory tier configurations (TTL in seconds)
     TIER_CONFIG = {
@@ -47,15 +58,20 @@ class PythonRAGBackend:
         redis_port: int = 6380,
         redis_db: int = 0,
         pool_size: int = 50,
+        use_embedded_store: bool = True,  # Default: Use embedded store (standalone)
+        use_optimized_rag: bool = True,  # Use optimized embedded store by default
     ) -> None:
         """
         Initialize Python RAG backend.
 
         Args:
-            redis_host: Redis server hostname
-            redis_port: Redis server port
-            redis_db: Redis database number
-            pool_size: Connection pool size (default: 50 for production workloads)
+            redis_host: Redis server hostname (only used if use_embedded_store=False)
+            redis_port: Redis server port (only used if use_embedded_store=False)
+            redis_db: Redis database number (only used if use_embedded_store=False)
+            pool_size: Connection pool size (only used if use_embedded_store=False)
+            use_embedded_store: If True (default), use embedded file-based vector store.
+                               If False, use Redis backend (requires Redis server).
+            use_optimized_rag: If True (default), use OptimizedEmbeddedStore with indexing.
         """
         self.redis_host = redis_host
         self.redis_port = redis_port
@@ -65,44 +81,54 @@ class PythonRAGBackend:
         self.async_redis_client: Optional[aioredis.Redis] = None
         self.embedding_model: Optional[Any] = None
         self.encoder: Optional[Any] = None
+        self.use_embedded_store = use_embedded_store # Store the flag
+        self.use_optimized_rag = use_optimized_rag  # Store optimization flag
+        self.embedded_store: Optional[EmbeddedVectorStore] = None # Initialize embedded store
 
     async def initialize(self) -> bool:
         """
-        Initialize Redis connections and embedding model.
-
-        Returns:
-            True if initialization successful, False otherwise
+        Initialize Redis connections or embedded store and embedding model.
         """
-        try:
-            # Create connection pool for better performance
-            self.redis_pool = ConnectionPool(
-                host=self.redis_host,
-                port=self.redis_port,
-                db=self.redis_db,
-                max_connections=self.pool_size,
-                decode_responses=False,
-            )
+        if self.use_embedded_store:
+            # Select the appropriate embedded store based on optimization flag
+            if self.use_optimized_rag:
+                logger.info("Using OptimizedEmbeddedVectorStore with indexing and caching")
+                self.embedded_store = OptimizedEmbeddedVectorStore()
+            else:
+                logger.info("Using standard EmbeddedVectorStore")
+                self.embedded_store = EmbeddedVectorStore()
+            return await self.embedded_store.initialize()
+        else:
+            try:
+                # Create connection pool for better performance
+                self.redis_pool = ConnectionPool(
+                    host=self.redis_host,
+                    port=self.redis_port,
+                    db=self.redis_db,
+                    max_connections=self.pool_size,
+                    decode_responses=False,
+                )
 
-            self.async_redis_client = aioredis.Redis(connection_pool=self.redis_pool)
+                self.async_redis_client = aioredis.Redis(connection_pool=self.redis_pool)
 
-            # Test connection
-            await self.async_redis_client.ping()
+                # Test connection
+                await self.async_redis_client.ping()
 
-            # Load embedding model if available
-            if SENTENCE_TRANSFORMERS_AVAILABLE:
-                print("Loading embedding model...")
-                self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+                # Load embedding model if available
+                if SENTENCE_TRANSFORMERS_AVAILABLE:
+                    logger.info("Loading embedding model...")
+                    self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-            # Initialize tokenizer if available
-            if TIKTOKEN_AVAILABLE:
-                self.encoder = get_encoding("cl100k_base")
+                # Initialize tokenizer if available
+                if TIKTOKEN_AVAILABLE:
+                    self.encoder = get_encoding("cl100k_base")
 
-            print("RAG-Redis system initialized successfully")
-            return True
+                logger.info("RAG-Redis system initialized successfully")
+                return True
 
-        except (ConnectionError, TimeoutError, OSError) as e:
-            print(f"Failed to initialize RAG-Redis system: {e}")
-            return False
+            except (ConnectionError, TimeoutError, OSError) as e:
+                logger.error(f"Failed to initialize RAG-Redis system: {e}")
+                return False
 
     def get_redis_key(self, memory_type: str, entry_id: Optional[str] = None) -> str:
         """
@@ -168,78 +194,59 @@ class PythonRAGBackend:
 
         return keys
 
-    async def store_memory(
-        self,
-        content: str,
-        memory_type: str,
-        importance: float = 0.5,
-        tags: Optional[list[str]] = None,
-    ) -> Optional[str]:
+    async def store_memory(self, params: StoreMemoryParams) -> Optional[str]:
         """
-        Store content in specified memory tier.
-
-        Args:
-            content: Content to store
-            memory_type: Memory tier type
-            importance: Importance score (0.0 to 1.0)
-            tags: Optional list of tags
-
-        Returns:
-            Entry ID if successful, None otherwise
+        Store content in specified memory tier using structured parameters.
         """
-        if not self.async_redis_client:
+        if self.use_embedded_store and self.embedded_store:
+            return await self.embedded_store.store_memory(params)
+        elif not self.async_redis_client:
+            logger.error("Redis client not initialized.")
             return None
 
         try:
-            entry = MemoryEntry(content, memory_type, importance)
-            if tags:
-                entry.add_tags(*tags)
+            entry = MemoryEntry(params.content, params.memory_type, params.importance)
+            if params.tags:
+                entry.add_tags(*params.tags)
 
             # Generate embedding
-            entry.embedding = self.get_embedding(content)
+            entry.embedding = self.get_embedding(params.content)
 
             # Store in Redis
-            key = self.get_redis_key(memory_type, entry.id)
+            key = self.get_redis_key(params.memory_type, entry.id)
             data = json.dumps(entry.to_dict())
 
-            config = self.TIER_CONFIG.get(memory_type, self.TIER_CONFIG[MemoryTier.SHORT_TERM])
+            config = self.TIER_CONFIG.get(params.memory_type, self.TIER_CONFIG[MemoryTier.SHORT_TERM])
             if config["ttl"]:
                 await self.async_redis_client.setex(key, config["ttl"], data)
             else:
                 await self.async_redis_client.set(key, data)
 
             # Enforce tier size limits
-            await self._enforce_tier_limits(memory_type)
+            await self._enforce_tier_limits(params.memory_type)
 
-            print(f"Stored memory in {memory_type} tier: {entry.id[:8]}...")
+            logger.info(f"Stored memory in {params.memory_type} tier: {entry.id[:8]}...")
             return entry.id
 
         except (aioredis.RedisError, json.JSONEncodeError, ValueError) as e:
-            print(f"Error storing memory: {e}")
+            logger.error(f"Error storing memory: {e}")
             return None
 
-    async def recall_memories(
-        self, query: str, memory_type: Optional[str] = None, limit: int = 5
-    ) -> list[MemoryEntry]:
+    async def recall_memories(self, params: RecallMemoriesParams) -> list[MemoryEntry]:
         """
-        Retrieve memories based on semantic similarity to query.
-
-        Args:
-            query: Query text
-            memory_type: Optional memory tier to search (None = all tiers)
-            limit: Maximum number of results
-
-        Returns:
-            List of memory entries sorted by relevance
+        Retrieve memories based on semantic similarity to query using structured parameters.
         """
-        if not self.async_redis_client:
+        if self.use_embedded_store and self.embedded_store:
+            return await self.embedded_store.recall_memories(params)
+        elif not self.async_redis_client:
+            logger.error("Redis client not initialized.")
             return []
 
         try:
-            query_embedding = self.get_embedding(query)
+            query_embedding = self.get_embedding(params.query)
             results: list[MemoryEntry] = []
 
-            memory_types = [memory_type] if memory_type else list(self.TIER_CONFIG.keys())
+            memory_types = [params.memory_type] if params.memory_type else list(self.TIER_CONFIG.keys())
 
             for tier in memory_types:
                 pattern = self.get_redis_key(tier)
@@ -270,10 +277,10 @@ class PythonRAGBackend:
 
             # Sort by combined similarity and importance
             results.sort(key=lambda x: (x.similarity_score * x.importance), reverse=True)  # type: ignore
-            return results[:limit]
+            return results[:params.limit]
 
         except (aioredis.RedisError, ValueError) as e:
-            print(f"Error recalling memories: {e}")
+            logger.error(f"Error recalling memories: {e}")
             return []
 
     @staticmethod
@@ -297,29 +304,19 @@ class PythonRAGBackend:
 
         return float(dot_product / (norm1 * norm2))
 
-    async def search_memories(
-        self,
-        query: str,
-        memory_type: Optional[str] = None,
-        min_importance: float = 0.0,
-    ) -> list[MemoryEntry]:
+    async def search_memories(self, params: SearchParams) -> list[MemoryEntry]:
         """
-        Search memories by content and importance.
-
-        Args:
-            query: Search query
-            memory_type: Optional memory tier
-            min_importance: Minimum importance threshold
-
-        Returns:
-            List of matching memory entries
+        Search memories by content and importance using structured parameters.
         """
-        if not self.async_redis_client:
+        if self.use_embedded_store and self.embedded_store:
+            return await self.embedded_store.search_memories(params)
+        elif not self.async_redis_client:
+            logger.error("Redis client not initialized.")
             return []
 
         try:
             results: list[MemoryEntry] = []
-            memory_types = [memory_type] if memory_type else list(self.TIER_CONFIG.keys())
+            memory_types = [params.memory_type] if params.memory_type else list(self.TIER_CONFIG.keys())
 
             for tier in memory_types:
                 pattern = self.get_redis_key(tier)
@@ -339,8 +336,8 @@ class PythonRAGBackend:
 
                                 # Filter by importance and content match
                                 if (
-                                    entry.importance >= min_importance
-                                    and query.lower() in entry.content.lower()
+                                    entry.importance >= params.min_importance
+                                    and params.query.lower() in entry.content.lower()
                                 ):
                                     results.append(entry)
                             except (json.JSONDecodeError, KeyError, ValueError):
@@ -351,27 +348,19 @@ class PythonRAGBackend:
             return results
 
         except (aioredis.RedisError, ValueError) as e:
-            print(f"Error searching memories: {e}")
+            logger.error(f"Error searching memories: {e}")
             return []
 
-    async def ingest_document(
-        self, file_path: str, memory_type: str = MemoryTier.LONG_TERM, chunk_size: int = 500
-    ) -> int:
+    async def ingest_document(self, params: IngestDocumentParams) -> int:
         """
-        Ingest a document into the memory system by chunking.
-
-        Args:
-            file_path: Path to document file
-            memory_type: Memory tier to store chunks
-            chunk_size: Chunk size in tokens (if tiktoken available) or characters
-
-        Returns:
-            Number of chunks stored
+        Ingest a document into the memory system by chunking using structured parameters.
         """
+        if self.use_embedded_store and self.embedded_store:
+            return await self.embedded_store.ingest_document(params)
         try:
-            path = Path(file_path)
+            path = Path(params.file_path)
             if not path.exists():
-                print(f"File not found: {file_path}")
+                logger.warning(f"File not found: {params.file_path}")
                 return 0
 
             # Read file content asynchronously
@@ -379,23 +368,29 @@ class PythonRAGBackend:
                 content = await f.read()
 
             # Chunk the document
-            chunks = self._chunk_text(content, chunk_size)
+            chunks = self._chunk_text(content, params.chunk_size)
             stored_count = 0
 
             # Store chunks with batch operations
             for i, chunk in enumerate(chunks):
-                importance = 0.7 if memory_type == MemoryTier.LONG_TERM else 0.5
+                importance = 0.7 if params.memory_type == MemoryTier.LONG_TERM else 0.5
                 tags = [f"document:{path.name}", f"chunk:{i}"]
 
-                entry_id = await self.store_memory(chunk, memory_type, importance, tags)
+                store_params = StoreMemoryParams(
+                    content=chunk,
+                    memory_type=params.memory_type,
+                    importance=importance,
+                    tags=tags
+                )
+                entry_id = await self.store_memory(params=store_params)
                 if entry_id:
                     stored_count += 1
 
-            print(f"Ingested document: {stored_count} chunks from {path.name}")
+            logger.info(f"Ingested document: {stored_count} chunks from {path.name}")
             return stored_count
 
         except (OSError, UnicodeDecodeError, ValueError) as e:
-            print(f"Error ingesting document: {e}")
+            logger.error(f"Error ingesting document: {e}")
             return 0
 
     def _chunk_text(self, text: str, chunk_size: int) -> list[str]:
@@ -487,10 +482,10 @@ class PythonRAGBackend:
     async def get_memory_stats(self) -> dict[str, Any]:
         """
         Get statistics about memory usage across tiers.
-
-        Returns:
-            Dictionary with memory statistics
         """
+        if self.use_embedded_store and self.embedded_store:
+            return await self.embedded_store.get_memory_stats()
+        
         stats: dict[str, Any] = {}
         total_entries = 0
 
@@ -565,8 +560,10 @@ class PythonRAGBackend:
         return cleaned
 
     async def close(self) -> None:
-        """Close Redis connections."""
-        if self.async_redis_client:
+        """Close Redis connections or embedded store."""
+        if self.use_embedded_store and self.embedded_store:
+            await self.embedded_store.close()
+        elif self.async_redis_client:
             await self.async_redis_client.close()
         if self.redis_pool:
             await self.redis_pool.disconnect()

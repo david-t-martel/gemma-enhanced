@@ -5,9 +5,11 @@ from .enums import Role
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import logging
 
 import aiofiles
 
+logger = logging.getLogger(__name__)
 
 class ConversationManager:
     """Manages conversation history and context for the chat session."""
@@ -57,6 +59,7 @@ class ConversationManager:
         }
         self.messages.append(message)
         self._total_length += len(content)
+        logger.debug(f"Message added: role={role}, content_len={len(content)}, total_len={self._total_length}")
         self._trim_context()
 
     def _trim_context(self) -> None:
@@ -73,6 +76,7 @@ class ConversationManager:
         while self._total_length > self.max_context_length and len(self.messages) > first_message_to_remove:
             removed = self.messages.pop(first_message_to_remove)
             self._total_length -= len(removed["content"])
+            logger.debug(f"Trimmed message: role={removed["role"]}, content_len={len(removed["content"])}, new_total_len={self._total_length}")
 
     def get_context_prompt(self) -> str:
         """
@@ -104,6 +108,7 @@ class ConversationManager:
         self.messages.clear()
         self._total_length = 0
         self.session_start = datetime.now()
+        logger.info("Conversation history cleared.")
 
     async def save_to_file(self, filepath: Path) -> bool:
         """
@@ -127,7 +132,7 @@ class ConversationManager:
 
             return True
         except (OSError, json.JSONEncodeError, ValueError) as e:
-            print(f"Error saving conversation: {e}")
+            logger.error(f"Error saving conversation: {e}")
             return False
 
     async def load_from_file(self, filepath: Path) -> bool:
@@ -152,7 +157,7 @@ class ConversationManager:
 
             return True
         except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
-            print(f"Error loading conversation: {e}")
+            logger.error(f"Error loading conversation: {e}")
             return False
 
     def get_stats(self) -> dict[str, Any]:

@@ -20,9 +20,7 @@ from .checks import (
     check_system_requirements,
     display_health_check_results,
 )
-from .templates import TEMPLATES, customize_template, get_template, list_templates
-
-console = Console()
+from .templates import get_template, list_templates
 
 
 class PathValidator(Validator):
@@ -55,13 +53,19 @@ class PathValidator(Validator):
 class OnboardingWizard:
     """Interactive setup wizard for first-time users."""
 
-    def __init__(self, config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        console: Console | None = None,
+        config_path: Path | None = None,
+    ) -> None:
         """
         Initialize the onboarding wizard.
 
         Args:
+            console: Rich Console instance for output (injected dependency)
             config_path: Path where config will be saved (default: ~/.gemma_cli/config.toml)
         """
+        self.console = console or Console()  # Fallback for backward compatibility
         self.session = PromptSession()
         self.config: dict[str, Any] = {}
         self.config_path = (
@@ -80,35 +84,35 @@ class OnboardingWizard:
 
         # Check for existing configuration
         if self.config_path.exists():
-            console.print(
+            self.console.print(
                 f"\n[yellow]Found existing configuration at {self.config_path}[/yellow]"
             )
             if not Confirm.ask("Do you want to reconfigure?", default=False):
-                console.print("[green]Keeping existing configuration.[/green]")
+                self.console.print("[green]Keeping existing configuration.[/green]")
                 return {}
 
         # Step 1: Run system checks
-        console.print("\n[bold cyan]Step 1/6: System Health Check[/bold cyan]")
+        self.console.print("\n[bold cyan]Step 1/6: System Health Check[/bold cyan]")
         await self._run_health_checks()
 
         # Step 2: Model selection
-        console.print("\n[bold cyan]Step 2/6: Model Selection[/bold cyan]")
+        self.console.print("\n[bold cyan]Step 2/6: Model Selection[/bold cyan]")
         model_config = await self._step_model_selection()
 
         # Step 3: Redis configuration
-        console.print("\n[bold cyan]Step 3/6: Redis Configuration[/bold cyan]")
+        self.console.print("\n[bold cyan]Step 3/6: Redis Configuration[/bold cyan]")
         redis_config = await self._step_redis_config()
 
         # Step 4: Performance profile
-        console.print("\n[bold cyan]Step 4/6: Performance Profile[/bold cyan]")
+        self.console.print("\n[bold cyan]Step 4/6: Performance Profile[/bold cyan]")
         profile_config = await self._step_performance_profile()
 
         # Step 5: UI preferences
-        console.print("\n[bold cyan]Step 5/6: UI Preferences[/bold cyan]")
+        self.console.print("\n[bold cyan]Step 5/6: UI Preferences[/bold cyan]")
         ui_config = await self._step_ui_preferences()
 
         # Step 6: Optional features
-        console.print("\n[bold cyan]Step 6/6: Optional Features[/bold cyan]")
+        self.console.print("\n[bold cyan]Step 6/6: Optional Features[/bold cyan]")
         features_config = await self._step_optional_features()
 
         # Merge all configurations
@@ -117,7 +121,7 @@ class OnboardingWizard:
         )
 
         # Test configuration
-        console.print("\n[bold cyan]Testing Configuration...[/bold cyan]")
+        self.console.print("\n[bold cyan]Testing Configuration...[/bold cyan]")
         test_passed = await self._test_configuration(self.config)
 
         if test_passed:
@@ -134,7 +138,7 @@ class OnboardingWizard:
                 tutorial = InteractiveTutorial()
                 await tutorial.run()
         else:
-            console.print(
+            self.console.print(
                 "\n[yellow]Configuration test failed. Please review settings.[/yellow]"
             )
 
@@ -159,14 +163,14 @@ class OnboardingWizard:
         You can reconfigure anytime by running: gemma-cli init --force
         """
 
-        console.print(Panel(welcome_text, border_style="cyan", padding=(1, 2)))
+        self.console.print(Panel(welcome_text, border_style="cyan", padding=(1, 2)))
 
     async def _run_health_checks(self) -> None:
         """Run system health checks."""
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            console=console,
+            console=self.console,
         ) as progress:
             task = progress.add_task("Running system checks...", total=None)
             checks = await check_system_requirements()
@@ -175,7 +179,7 @@ class OnboardingWizard:
         all_passed = display_health_check_results(checks)
 
         if not all_passed:
-            console.print(
+            self.console.print(
                 "\n[yellow]Some checks failed. You can continue, but some features may not work.[/yellow]"
             )
             if not Confirm.ask("Continue anyway?", default=True):
@@ -183,10 +187,13 @@ class OnboardingWizard:
 
     async def _step_model_selection(self) -> dict[str, Any]:
         """Guide user through model selection."""
-        console.print("\n[bold]Model Configuration[/bold]")
-        console.print(
+        self.console.print("\n[bold]Model Configuration[/bold]")
+        self.console.print(
             "Select a Gemma model for inference. Models should be in .sbs format.\n"
         )
+        # TODO: [Model Management] Integrate model download functionality here.
+        # Offer to download recommended models if none are found or if user prefers.
+        # This is crucial for a standalone local LLM TUI.
 
         # Show common model locations
         common_paths = [
@@ -195,22 +202,31 @@ class OnboardingWizard:
             Path.home() / "models",
         ]
 
-        console.print("[dim]Common model locations:[/dim]")
+        self.console.print("[dim]Common model locations:[/dim]")
         for path in common_paths:
             if path.exists():
                 sbs_files = list(path.glob("**/*.sbs"))
                 if sbs_files:
-                    console.print(f"  [green]✓[/green] {path} ({len(sbs_files)} models)")
+                    self.console.print(f"  [green]✓[/green] {path} ({len(sbs_files)} models)")
                 else:
-                    console.print(f"  [dim]• {path} (empty)[/dim]")
+                    self.console.print(f"  [dim]• {path} (empty)[/dim]")
             else:
-                console.print(f"  [dim]• {path} (not found)[/dim]")
+                self.console.print(f"  [dim]• {path} (not found)[/dim]")
 
         # Detect available models
         available_models = self._detect_available_models()
 
-        if available_models:
-            console.print(f"\n[bold]Found {len(available_models)} model(s):[/bold]")
+        if not available_models:
+            self.console.print("\n[yellow]No local models found.[/yellow]")
+            if Confirm.ask("\nDownload the recommended default model (gemma-2b-it-sfp)?"):
+                # TODO: [Model Management] Call the download logic here.
+                # For now, we'll just print a message.
+                self.console.print("\n[green]Model download functionality to be implemented.[/green]")
+                # After download, we would need to re-detect models or directly use the downloaded path.
+                # For now, we'll proceed to manual entry.
+
+        elif available_models:
+            self.console.print(f"\n[bold]Found {len(available_models)} model(s):[/bold]")
             table = Table(show_header=True)
             table.add_column("ID", style="cyan", width=4)
             table.add_column("Model", style="white")
@@ -227,7 +243,7 @@ class OnboardingWizard:
                     has_tokenizer,
                 )
 
-            console.print(table)
+            self.console.print(table)
 
             # Let user select from available models
             if Confirm.ask("\nUse one of these models?", default=True):
@@ -244,18 +260,20 @@ class OnboardingWizard:
                             "default_tokenizer": str(selected["tokenizer"])
                             if selected["tokenizer"]
                             else "",
+                            # TODO: [Executable Discovery] The _find_gemma_executable call here should be more robust,
+                            # potentially pointing to a bundled uvx wrapper or a known installation path.
                             "executable": self._find_gemma_executable(),
                         }
                     }
 
         # Manual path entry
-        console.print("\n[bold]Enter model path manually:[/bold]")
+        self.console.print("\n[bold]Enter model path manually:[/bold]")
         while True:
             model_path = Prompt.ask("Model path (.sbs file or directory)")
 
             success, message = await check_model_files(model_path)
             if success:
-                console.print(f"[green]✓ {message}[/green]")
+                self.console.print(f"[green]✓ {message}[/green]")
 
                 # Try to find tokenizer
                 path = Path(model_path)
@@ -283,7 +301,7 @@ class OnboardingWizard:
                     }
                 }
             else:
-                console.print(f"[red]✗ {message}[/red]")
+                self.console.print(f"[red]✗ {message}[/red]")
                 if not Confirm.ask("Try again?", default=True):
                     raise SystemExit(0)
 
@@ -335,36 +353,44 @@ class OnboardingWizard:
         return "gemma.exe"
 
     async def _step_redis_config(self) -> dict[str, Any]:
-        """Configure Redis connection."""
-        console.print("\n[bold]Redis Configuration[/bold]")
-        console.print(
-            "Redis is used for the 5-tier memory system and RAG capabilities.\n"
+        """Configure Redis connection or embedded store."""
+        self.console.print("\n[bold]Memory Storage Configuration[/bold]")
+        self.console.print(
+            "The 5-tier memory system and RAG capabilities can use either:\n"
+            "  • [green]Embedded storage[/green] (default) - File-based, no setup required\n"
+            "  • [cyan]Redis[/cyan] (optional) - For distributed access or large datasets\n"
         )
 
-        # Test localhost:6379 first
-        console.print("Testing default connection (localhost:6379)...")
+        # Default to embedded store (standalone mode)
+        self.console.print("[dim]Checking for Redis (optional)...[/dim]")
         success, message = await check_redis_connection("localhost", 6379)
 
         if success:
-            console.print(f"[green]✓ {message}[/green]")
-            if Confirm.ask("Use default Redis configuration?", default=True):
-                return get_template("developer")["config"]["redis"]
-
+            self.console.print(f"[green]✓ Redis detected: {message}[/green]")
+            if Confirm.ask("Use Redis for memory storage?", default=False):
+                return {
+                    "redis": {
+                        "host": "localhost",
+                        "port": 6379,
+                        "db": 0,
+                        "enable_fallback": False,  # Use Redis
+                    }
+                }
         else:
-            console.print(f"[yellow]✗ {message}[/yellow]")
+            self.console.print(f"[dim]✗ {message}[/dim]")
 
-        # Manual configuration
-        if Confirm.ask("Configure Redis manually?", default=False):
+        # Manual Redis configuration (for advanced users)
+        if Confirm.ask("\nConfigure Redis manually? (advanced)", default=False):
             host = Prompt.ask("Redis host", default="localhost")
             port = IntPrompt.ask("Redis port", default=6379)
             db = IntPrompt.ask("Redis database", default=0)
 
             # Test connection
-            console.print(f"\nTesting connection to {host}:{port}...")
+            self.console.print(f"\nTesting connection to {host}:{port}...")
             success, message = await check_redis_connection(host, port)
 
             if success:
-                console.print(f"[green]✓ {message}[/green]")
+                self.console.print(f"[green]✓ {message}[/green]")
                 return {
                     "redis": {
                         "host": host,
@@ -372,29 +398,30 @@ class OnboardingWizard:
                         "db": db,
                         "pool_size": 10,
                         "connection_timeout": 5,
-                        "enable_fallback": True,
+                        "enable_fallback": False,  # Use Redis
                     }
                 }
             else:
-                console.print(f"[red]✗ {message}[/red]")
-                console.print(
-                    "[yellow]Continuing with default config. RAG features will be disabled.[/yellow]"
+                self.console.print(f"[red]✗ {message}[/red]")
+                self.console.print(
+                    "[yellow]Falling back to embedded storage.[/yellow]"
                 )
 
-        # Return minimal config if Redis unavailable
+        # Default to embedded store
+        self.console.print("[green]Using embedded file-based storage (recommended for local use)[/green]")
         return {
             "redis": {
                 "host": "localhost",
                 "port": 6379,
                 "db": 0,
-                "enable_fallback": True,
+                "enable_fallback": True,  # Use embedded store
             }
         }
 
     async def _step_performance_profile(self) -> dict[str, Any]:
         """Select performance profile."""
-        console.print("\n[bold]Performance Profile[/bold]")
-        console.print("Choose a configuration template:\n")
+        self.console.print("\n[bold]Performance Profile[/bold]")
+        self.console.print("Choose a configuration template:\n")
 
         templates = list_templates()
         table = Table(show_header=True)
@@ -405,7 +432,7 @@ class OnboardingWizard:
         for i, (key, name, desc) in enumerate(templates, 1):
             table.add_row(str(i), name, desc)
 
-        console.print(table)
+        self.console.print(table)
 
         choice = IntPrompt.ask(
             "\nSelect profile",
@@ -422,7 +449,7 @@ class OnboardingWizard:
 
     async def _step_ui_preferences(self) -> dict[str, Any]:
         """Configure UI preferences."""
-        console.print("\n[bold]UI Preferences[/bold]")
+        self.console.print("\n[bold]UI Preferences[/bold]")
 
         show_stats = Confirm.ask("Show memory statistics?", default=True)
         show_perf = Confirm.ask("Show performance metrics?", default=True)
@@ -450,7 +477,7 @@ class OnboardingWizard:
 
     async def _step_optional_features(self) -> dict[str, Any]:
         """Configure optional features."""
-        console.print("\n[bold]Optional Features[/bold]")
+        self.console.print("\n[bold]Optional Features[/bold]")
 
         enable_mcp = Confirm.ask(
             "Enable MCP (Model Context Protocol) integration?", default=True
@@ -494,7 +521,7 @@ class OnboardingWizard:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            console=console,
+            console=self.console,
         ) as progress:
             # Test model loading
             task1 = progress.add_task("Testing model configuration...", total=None)
@@ -503,24 +530,26 @@ class OnboardingWizard:
                 if model_path:
                     success, msg = await check_model_files(model_path)
                     if success:
-                        console.print(f"  [green]✓ Model: {msg}[/green]")
+                        self.console.print(f"  [green]✓ Model: {msg}[/green]")
                     else:
-                        console.print(f"  [red]✗ Model: {msg}[/red]")
+                        self.console.print(f"  [red]✗ Model: {msg}[/red]")
                         all_passed = False
             progress.update(task1, completed=True)
 
-            # Test Redis connection
-            task2 = progress.add_task("Testing Redis connection...", total=None)
+            # Test memory storage configuration
+            task2 = progress.add_task("Testing memory storage...", total=None)
             if "redis" in config:
                 redis_cfg = config["redis"]
-                success, msg = await check_redis_connection(
-                    redis_cfg.get("host", "localhost"), redis_cfg.get("port", 6379)
-                )
-                if success:
-                    console.print(f"  [green]✓ Redis: {msg}[/green]")
+                if redis_cfg.get("enable_fallback", True):
+                    self.console.print(f"  [green]✓ Memory: Using embedded storage (standalone mode)[/green]")
                 else:
-                    console.print(f"  [yellow]⚠ Redis: {msg}[/yellow]")
-                    # Don't fail on Redis - it's optional
+                    success, msg = await check_redis_connection(
+                        redis_cfg.get("host", "localhost"), redis_cfg.get("port", 6379)
+                    )
+                    if success:
+                        self.console.print(f"  [green]✓ Memory: Redis connected - {msg}[/green]")
+                    else:
+                        self.console.print(f"  [yellow]⚠ Memory: Redis unavailable, will use embedded storage[/yellow]")
             progress.update(task2, completed=True)
 
         return all_passed
@@ -534,7 +563,7 @@ class OnboardingWizard:
         with open(self.config_path, "w", encoding="utf-8") as f:
             toml.dump(self.config, f)
 
-        console.print(
+        self.console.print(
             f"\n[green]✓ Configuration saved to {self.config_path}[/green]"
         )
 
@@ -553,4 +582,4 @@ class OnboardingWizard:
         [dim]To reconfigure: gemma-cli init --force[/dim]
         """
 
-        console.print(Panel(success_text, border_style="green", padding=(1, 2)))
+        self.console.print(Panel(success_text, border_style="green", padding=(1, 2)))

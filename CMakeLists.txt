@@ -140,41 +140,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# ----------------------------------------------------------------------------
-# Global Strict Mode (treat warnings as errors for project targets)
-# Excludes targets whose SOURCE_DIR lives under third_party/ to avoid
-# inheriting external project noise. Individual subdirectories (e.g. session)
-# may already add /WX or -Werror; this provides a unified toggle.
-# ----------------------------------------------------------------------------
-option(GEMMA_STRICT "Treat warnings as errors for all in-repo targets (ex third_party)" ON)
-if(GEMMA_STRICT)
-    message(STATUS "Strict mode: ON (promoting warnings to errors for project targets)")
-    # Collect all defined targets so far
-    get_property(_ALL_GEMMA_TARGETS GLOBAL PROPERTY TARGETS)
-    foreach(_t IN LISTS _ALL_GEMMA_TARGETS)
-        # Skip imported / interface / utility targets
-        get_target_property(_t_type ${_t} TYPE)
-        if(_t_type STREQUAL "INTERFACE_LIBRARY" OR _t_type STREQUAL "UTILITY")
-            continue()
-        endif()
-        # Some generated helper targets have no SOURCE_DIR (skip quietly)
-        get_target_property(_t_src_dir ${_t} SOURCE_DIR)
-        if(NOT _t_src_dir)
-            continue()
-        endif()
-        # Exclude any target defined under third_party
-        string(FIND "${_t_src_dir}" "${CMAKE_SOURCE_DIR}/third_party" _third_party_pos)
-        if(_third_party_pos EQUAL 0)
-            continue()
-        endif()
-        # Apply warnings-as-errors
-        if(MSVC)
-            target_compile_options(${_t} PRIVATE /WX)
-        else()
-            target_compile_options(${_t} PRIVATE -Werror)
-        endif()
-    endforeach()
-endif()
+# GEMMA_STRICT block moved to end of file after all targets are defined
 
 # For multi-configuration generators (Visual Studio, Xcode), create per-config subdirectories
 foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
@@ -613,3 +579,42 @@ message(STATUS "  - Vulkan: ${GEMMA_BUILD_VULKAN_BACKEND}")
 message(STATUS "  - OpenCL: ${GEMMA_BUILD_OPENCL_BACKEND}")
 message(STATUS "  - Metal: ${GEMMA_BUILD_METAL_BACKEND}")
 message(STATUS "===============================================")
+
+# ----------------------------------------------------------------------------
+# Global Strict Mode (treat warnings as errors for project targets)
+# Placed at end to ensure all targets from subdirectories are included.
+# Excludes targets whose SOURCE_DIR lives under third_party/ to avoid
+# inheriting external project noise.
+# ----------------------------------------------------------------------------
+option(GEMMA_STRICT "Treat warnings as errors for all in-repo targets (ex third_party)" ON)
+if(GEMMA_STRICT)
+    message(STATUS "Applying strict mode: warnings-as-errors for project targets")
+    # Collect all defined targets
+    get_property(_ALL_GEMMA_TARGETS GLOBAL PROPERTY TARGETS)
+    set(_STRICT_TARGET_COUNT 0)
+    foreach(_t IN LISTS _ALL_GEMMA_TARGETS)
+        # Skip imported / interface / utility targets
+        get_target_property(_t_type ${_t} TYPE)
+        if(_t_type STREQUAL "INTERFACE_LIBRARY" OR _t_type STREQUAL "UTILITY")
+            continue()
+        endif()
+        # Some generated helper targets have no SOURCE_DIR (skip quietly)
+        get_target_property(_t_src_dir ${_t} SOURCE_DIR)
+        if(NOT _t_src_dir)
+            continue()
+        endif()
+        # Exclude any target defined under third_party
+        string(FIND "${_t_src_dir}" "${CMAKE_SOURCE_DIR}/third_party" _third_party_pos)
+        if(_third_party_pos EQUAL 0)
+            continue()
+        endif()
+        # Apply warnings-as-errors
+        if(MSVC)
+            target_compile_options(${_t} PRIVATE /WX)
+        else()
+            target_compile_options(${_t} PRIVATE -Werror)
+        endif()
+        math(EXPR _STRICT_TARGET_COUNT "${_STRICT_TARGET_COUNT} + 1")
+    endforeach()
+    message(STATUS "Strict mode applied to ${_STRICT_TARGET_COUNT} project targets")
+endif()

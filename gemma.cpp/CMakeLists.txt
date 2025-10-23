@@ -249,7 +249,7 @@ if(NOT DEFINED GEMMA_SENTENCEPIECE_LIB)
     message(FATAL_ERROR "GEMMA_SENTENCEPIECE_LIB not defined. Dependencies.cmake should have been included first.")
 endif()
 
-find_package(Threads REQUIRED)
+# Note: Threads already found by root CMakeLists.txt at line 70
 target_link_libraries(libgemma ${GEMMA_HWY_LIBS} ${GEMMA_SENTENCEPIECE_LIB} ${GEMMA_JSON_LIB} Threads::Threads ${GEMMA_BENCHMARK_LIB} ${GEMMA_GTEST_LIBS} ${GEMMA_BACKEND_LIBS})
 target_include_directories(libgemma PUBLIC ${sentencepiece_SOURCE_DIR})
 target_compile_definitions(libgemma PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS NOMINMAX>)
@@ -404,13 +404,8 @@ if(GEMMA_ENABLE_SYCL)
             message(WARNING "Using device library variant (${IntelSYCL_LIBRARY}); linking may require full SYCL import library in some configurations")
           endif()
 
-          # Optionally force Intel compiler globally for SYCL compilation
-          if(GEMMA_FORCE_INTEL_COMPILER_FOR_SYCL AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
-            message(STATUS "GEMMA_FORCE_INTEL_COMPILER_FOR_SYCL=ON: Setting CMAKE_CXX_COMPILER to ${IntelSYCL_COMPILER}")
-            set(CMAKE_CXX_COMPILER "${IntelSYCL_COMPILER}" CACHE FILEPATH "Forced Intel compiler for SYCL" FORCE)
-            # Note: This change will take effect for targets created after this point
-            message(WARNING "Compiler change requires clean rebuild. Consider setting CMAKE_CXX_COMPILER before project() call for best results.")
-          endif()
+          # Note: Compiler is set per-target for SYCL backend (see lines 453-458)
+          # Global CMAKE_CXX_COMPILER override removed to avoid dangerous mid-configuration changes
 
           break()
         endif()

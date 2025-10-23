@@ -3,10 +3,12 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
+import logging
 
 import numpy as np
 import numpy.typing as npt
 
+logger = logging.getLogger(__name__)
 
 class MemoryTier:
     """Represents memory tier types with TTL and capacity settings."""
@@ -42,6 +44,7 @@ class MemoryEntry:
         self.tags: set[str] = set()
         self.metadata: dict[str, Any] = {}
         self.embedding: Optional[npt.NDArray[np.float32]] = None
+        logger.debug(f"MemoryEntry created: id={self.id[:8]}..., type={memory_type}, importance={importance}")
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -84,7 +87,7 @@ class MemoryEntry:
 
         if data.get("embedding"):
             entry.embedding = np.array(data["embedding"], dtype=np.float32)
-
+        logger.debug(f"MemoryEntry loaded from dict: id={entry.id[:8]}..., type={entry.memory_type}")
         return entry
 
     def update_access(self) -> None:
@@ -100,6 +103,7 @@ class MemoryEntry:
             *tags: Variable number of tag strings to add
         """
         self.tags.update(tags)
+        logger.debug(f"Tags added to MemoryEntry {self.id[:8]}...: {tags}. All tags: {self.tags}")
 
     def add_metadata(self, key: str, value: Any) -> None:
         """
@@ -110,6 +114,7 @@ class MemoryEntry:
             value: Metadata value
         """
         self.metadata[key] = value
+        logger.debug(f"Metadata added to MemoryEntry {self.id[:8]}...: {key}={value}")
 
     def calculate_relevance(self, time_decay_factor: float = 0.1) -> float:
         """
@@ -131,5 +136,6 @@ class MemoryEntry:
 
         # Combined relevance
         relevance = (self.importance * 0.5) + (time_decay * 0.3) + (access_boost * 0.2)
+        logger.debug(f"Relevance calculated for MemoryEntry {self.id[:8]}...: {relevance:.4f}")
 
         return max(0.0, min(1.0, relevance))

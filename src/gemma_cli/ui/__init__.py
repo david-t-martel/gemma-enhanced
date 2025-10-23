@@ -18,11 +18,12 @@ from gemma_cli.ui.theme import (
     get_theme,
 )
 
-# Console singleton
+# Console factory and utilities
 from gemma_cli.ui.console import (
     captured_console,
     clear_screen,
-    get_console,
+    create_console,  # NEW: Factory function for dependency injection
+    get_console,  # DEPRECATED: Use create_console() instead
     get_console_height,
     get_console_width,
     print_error,
@@ -93,7 +94,8 @@ __all__ = [
     "get_style_for_message_type",
     "get_color_for_memory_tier",
     # Console
-    "get_console",
+    "create_console",  # NEW: Recommended way to create console instances
+    "get_console",  # DEPRECATED: Use create_console() instead
     "reset_console",
     "styled_console",
     "captured_console",

@@ -4,7 +4,7 @@
     {
       "label": "Configure (RelWithSymbols)",
       "type": "shell",
-      "command": "${env:CMAKE_ROOT}/cmake.exe",
+      "command": "cmake",
       "args": [
         "-S",
         ".",
@@ -20,7 +20,7 @@
     {
       "label": "Build (RelWithSymbols)",
       "type": "shell",
-      "command": "${env:CMAKE_ROOT}/cmake.exe",
+      "command": "cmake",
       "args": [
         "--build",
         "build",
@@ -37,7 +37,7 @@
     {
       "label": "Configure (FastDebug)",
       "type": "shell",
-      "command": "${env:CMAKE_ROOT}/cmake.exe",
+      "command": "cmake",
       "args": [
         "-S",
         ".",
@@ -52,7 +52,7 @@
     {
       "label": "Build (FastDebug)",
       "type": "shell",
-      "command": "${env:CMAKE_ROOT}/cmake.exe",
+      "command": "cmake",
       "args": [
         "--build",
         "build-fastdebug",
@@ -81,7 +81,7 @@
     {
       "label": "Reconfigure With SYCL (Verbose)",
       "type": "shell",
-      "command": "${env:CMAKE_ROOT}/cmake.exe",
+      "command": "cmake",
       "args": [
         "-S",
         ".",
@@ -97,7 +97,7 @@
     {
       "label": "Build SYCL",
       "type": "shell",
-      "command": "${env:CMAKE_ROOT}/cmake.exe",
+      "command": "cmake",
       "args": [
         "--build",
         "build-sycl",

@@ -2,8 +2,8 @@
   "files.watcherExclude": {
     "**/.git/objects/**": true,
     "**/.git/subtree-cache/**": true,
-    "**/build/**": false,
-    "**/build-windows-release/**": false
+    "**/build/**": true,
+    "**/build-windows-release/**": true
   },
   "files.exclude": {
     "**/.git": true,
